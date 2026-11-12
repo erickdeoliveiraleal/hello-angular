@@ -17,7 +17,7 @@ public class UppercaseController {
 	public record NameResponse(String result) {
 	}
 
-	@PostMapping("/uppercase")
+	@PostMapping("/protegido/uppercase")
 	public NameResponse uppercase(@RequestBody NameRequest request) {
 		String name = request.name() == null ? "" : request.name();
 		return new NameResponse(name.toUpperCase(Locale.ROOT));

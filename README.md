@@ -40,10 +40,10 @@ Once the server is running, open your browser and navigate to `http://localhost:
 
 ## Backend (Spring Boot)
 
-O backend fica em [`backend/`](backend) (Spring Boot 4.1.2, Java 17). Ele expõe um endpoint que recebe um nome e devolve em maiúsculas:
+O backend fica em [`backend/`](backend) (Spring Boot 4.1.2, Java 17). Ele expõe um endpoint que recebe um nome e devolve em maiúsculas (só para quem está logado, veja abaixo):
 
 ```
-POST /api/uppercase
+POST /api/protegido/uppercase
 { "name": "joão" }   ->   { "result": "JOÃO" }
 ```
 
@@ -79,7 +79,7 @@ curl -i -b cookies.txt http://localhost:8080/api/me
 
 A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 401 porque a sessão foi invalidada.
 
-Na tela, o formulário **Entrar** chama `/api/login` e, depois, a saudação usa `/api/uppercase` para mostrar o nome em maiúsculas. Como o `ng serve` faz proxy de `/api`, front e API ficam na mesma origem (`localhost:4200`) e o navegador envia o `JSESSIONID` sozinho, sem CORS. Um F5 mantém o login: a tela chama `/api/me` ao abrir.
+Na tela, o formulário **Entrar** chama `/api/login` e, depois, a saudação usa `/api/protegido/uppercase` para mostrar o nome em maiúsculas. Como o `ng serve` faz proxy de `/api`, front e API ficam na mesma origem (`localhost:4200`) e o navegador envia o `JSESSIONID` sozinho, sem CORS. Um F5 mantém o login: a tela chama `/api/me` ao abrir.
 
 ### Endpoint público × endpoint protegido
 
@@ -87,10 +87,11 @@ Na tela, o formulário **Entrar** chama `/api/login` e, depois, a saudação usa
 | ------ | --------------------------- | -------------------------------------------------------- |
 | GET    | `/api/publico/mensagem`     | **público**: `{ "mensagem": ... }`, mesmo sem login        |
 | GET    | `/api/protegido/hora-login` | **protegido**: `{ "name", "horaLogin" }`; sem sessão, 401 |
+| POST   | `/api/protegido/uppercase`  | **protegido**: nome em maiúsculas; sem sessão, 401         |
 
 Tudo em `/api/protegido/**` passa pelo `SessaoObrigatoriaInterceptor`, que devolve 401 se a sessão não tiver um nome. A hora do login é gravada na sessão por `/api/login`. A página mostra a mensagem pública sempre e, depois de entrar, a hora do login.
 
-O `/api/uppercase` continua público de propósito: ele vem de antes do login e fica fora de `/api/protegido/**`. Para protegê-lo, bastaria movê-lo para lá ou incluir o caminho no interceptor.
+O endpoint de maiúsculas nasceu como `/api/uppercase`, antes de existir login. Para protegê-lo bastou mudar o caminho para dentro de `/api/protegido/**`: o interceptor não precisou mudar.
 
 ## Para quem vem de JSF e WildFly
 

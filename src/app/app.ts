@@ -79,7 +79,7 @@ export class App implements OnInit {
   /** Marca como logado e cumprimenta com o nome em maiúsculas vindo do backend. */
   private entrou(nome: string): void {
     this.usuario.set(nome);
-    this.http.post<NameResponse>('/api/uppercase', { name: nome }).subscribe({
+    this.http.post<NameResponse>('/api/protegido/uppercase', { name: nome }).subscribe({
       next: (response) => this.greeting.set(`Hello, ${response.result}!`),
       error: () => this.greeting.set(`Hello, ${nome}!`),
     });
