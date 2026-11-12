@@ -40,7 +40,11 @@ public class SecurityConfig {
 		http
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/api/login", "/api/publico/**", "/error").permitAll()
-				.anyRequest().authenticated())
+				// Toda a API exige login, inclusive endpoints que ainda vão ser criados.
+				.requestMatchers("/api/**").authenticated()
+				// Fora de /api só há os arquivos da tela (index.html, .js, .css), servidos
+				// pelo próprio Spring no .jar de produção. A tela é pública; os dados, não.
+				.anyRequest().permitAll())
 			// Sem login: 401 (o padrão seria redirecionar para uma página de login, como no JSF).
 			.exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
 			// Por padrão o Spring guarda na sessão a requisição recusada, para "voltar a ela"

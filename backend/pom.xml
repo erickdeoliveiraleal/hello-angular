@@ -61,4 +61,79 @@
 		</plugins>
 	</build>
 
+	<profiles>
+		<!--
+			./mvnw -Pproducao package
+			Gera um .jar só, com a tela Angular dentro: o Spring serve a tela em "/" e a API
+			em "/api". Sem -Pproducao, o build é só do backend (como no desenvolvimento).
+		-->
+		<profile>
+			<id>producao</id>
+			<build>
+				<plugins>
+					<!-- Baixa o Node em target/ e compila o Angular (a pasta acima de backend/). -->
+					<plugin>
+						<groupId>com.github.eirslett</groupId>
+						<artifactId>frontend-maven-plugin</artifactId>
+						<version>1.15.1</version>
+						<configuration>
+							<workingDirectory>${project.basedir}/..</workingDirectory>
+							<installDirectory>${project.build.directory}</installDirectory>
+						</configuration>
+						<executions>
+							<execution>
+								<id>instalar-node</id>
+								<goals>
+									<goal>install-node-and-npm</goal>
+								</goals>
+								<configuration>
+									<nodeVersion>v26.13.1</nodeVersion>
+								</configuration>
+							</execution>
+							<execution>
+								<id>npm-ci</id>
+								<goals>
+									<goal>npm</goal>
+								</goals>
+								<configuration>
+									<arguments>ci</arguments>
+								</configuration>
+							</execution>
+							<execution>
+								<id>ng-build</id>
+								<goals>
+									<goal>npm</goal>
+								</goals>
+								<configuration>
+									<arguments>run build</arguments>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+					<!-- Copia a tela compilada para static/ dentro do .jar. -->
+					<plugin>
+						<artifactId>maven-resources-plugin</artifactId>
+						<executions>
+							<execution>
+								<id>copiar-tela</id>
+								<phase>process-resources</phase>
+								<goals>
+									<goal>copy-resources</goal>
+								</goals>
+								<configuration>
+									<outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+									<resources>
+										<resource>
+											<directory>${project.basedir}/../dist/hello-angular/browser</directory>
+										</resource>
+									</resources>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
+
 </project>

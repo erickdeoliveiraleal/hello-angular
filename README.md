@@ -111,7 +111,7 @@ Na tela, o formulário **Entrar** (nome e senha) chama `/api/login` e, depois, a
 | GET    | `/api/protegido/hora-login` | **protegido**: `{ "name", "horaLogin" }`; sem sessão, 401 |
 | POST   | `/api/protegido/uppercase`  | **protegido**: nome em maiúsculas; sem sessão, 401         |
 
-Quem decide o acesso é o **Spring Security**, configurado em [`SecurityConfig`](backend/src/main/java/com/example/backend/SecurityConfig.java): `/api/login` e `/api/publico/**` são liberados, e todo o resto exige login (senão 401). A hora do login é gravada na sessão por `/api/login`. A página mostra a mensagem pública sempre e, depois de entrar, a hora do login.
+Quem decide o acesso é o **Spring Security**, configurado em [`SecurityConfig`](backend/src/main/java/com/example/backend/SecurityConfig.java): `/api/login` e `/api/publico/**` são liberados, e todo o resto de `/api` exige login (senão 401). Fora de `/api` só ficam os arquivos da tela, que são públicos. A hora do login é gravada na sessão por `/api/login`. A página mostra a mensagem pública sempre e, depois de entrar, a hora do login.
 
 O endpoint de maiúsculas nasceu como `/api/uppercase`, antes de existir login, e depois foi movido para `/api/protegido/uppercase`.
 
@@ -122,6 +122,22 @@ O endpoint de maiúsculas nasceu como `/api/uppercase`, antes de existir login, 
 Como o navegador envia o `JSESSIONID` sozinho, um site malicioso poderia fazer o navegador de um usuário logado disparar um POST para cá. Para impedir isso, o Spring Security grava um token aleatório no cookie `XSRF-TOKEN` e exige o mesmo valor no header `X-XSRF-TOKEN` em todo POST, PUT e DELETE. Um site de outra origem não consegue ler o cookie, então não consegue montar o header.
 
 Do lado do Angular não há código nenhum: o `HttpClient` já lê o cookie `XSRF-TOKEN` e envia o header `X-XSRF-TOKEN` nas chamadas que alteram dados. Sem o header, a resposta é 403.
+
+## Produção: um `.jar` só
+
+Em produção não há `ng serve`: a tela Angular é compilada e vai **dentro do `.jar`** do Spring, que serve a tela em `/` e a API em `/api`, na mesma origem.
+
+```bash
+cd backend
+./mvnw -Pproducao package
+java -jar target/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+```
+
+- O `-Pproducao` baixa o Node.js em `backend/target`, roda `npm ci` e `ng build`, e copia a tela para o `.jar`. Pare o `ng serve` antes: o `npm ci` reinstala o `node_modules`.
+- O perfil `prod` ([`application-prod.properties`](backend/src/main/resources/application-prod.properties)) supõe um servidor web (nginx, Apache, IIS) na frente, cuidando do HTTPS na porta 443. O Spring escuta só em `127.0.0.1:8080`, e os cookies `JSESSIONID` e `XSRF-TOKEN` saem com a marca `Secure`.
+- Na própria máquina dá para testar em `http://localhost:8080/`: os navegadores aceitam cookies `Secure` em `localhost`.
+
+O [CURSO.md](CURSO.md#37-produção-um-jar-só) explica cada passo, cada propriedade, um exemplo de configuração do nginx e o que ainda falta para um sistema de verdade.
 
 ## Para quem vem de JSF e WildFly
 
@@ -185,6 +201,7 @@ git show <hash>
 14. *Não cria sessão para quem não está logado*: um ajuste de configuração e um teste contra o servidor real.
 15. *Login com usuário e senha*: senha com hash BCrypt, usando os componentes padrão do Spring Security, e o campo de senha na tela.
 16. *Entrar de novo depois de sair, sem recarregar*: um bug de CSRF que os testes com `MockMvc` não pegavam.
+17. *Produção: um .jar só, com perfil prod*: o Maven compila o Angular para dentro do `.jar`, com cookies `Secure` atrás de um servidor web com HTTPS.
 
 ## Code scaffolding
 

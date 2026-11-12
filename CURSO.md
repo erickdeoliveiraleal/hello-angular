@@ -26,6 +26,7 @@
   - [3.4 O template](#34-o-template-apphtml)
   - [3.5 Falando com o backend](#35-falando-com-o-backend-httpclient)
   - [3.6 O proxy](#36-o-proxy-proxyconfjson)
+  - [3.7 Produção: um .jar só](#37-produção-um-jar-só)
 - [Módulo 4: Os fluxos completos, passo a passo](#módulo-4-os-fluxos-completos-passo-a-passo)
 - [Módulo 5: Códigos HTTP usados](#módulo-5-códigos-http-usados)
 - [Módulo 6: Exercícios](#módulo-6-exercícios)
@@ -415,12 +416,16 @@ public class SecurityConfig {
 ```java
 .authorizeHttpRequests(auth -> auth
     .requestMatchers("/api/login", "/api/publico/**", "/error").permitAll()
-    .anyRequest().authenticated())
+    .requestMatchers("/api/**").authenticated()
+    .anyRequest().permitAll())
 ```
+
+As regras são lidas **de cima para baixo**, e vale a primeira que combinar com a URL.
 
 - `permitAll()`: liberado para todos. O login precisa ser liberado, senão ninguém conseguiria entrar.
 - `/error`: é a URL para onde o Tomcat encaminha quando um controller lança exceção (por exemplo, JSON malformado). Se ela não fosse liberada, um erro 400 viraria um 401 confuso.
-- `anyRequest().authenticated()`: **todo o resto exige login.** Por isso o `UppercaseController` não tem nenhuma linha de segurança: ele está protegido por padrão. É mais seguro do que listar o que proteger, porque um endpoint novo já nasce protegido.
+- `/api/**` + `authenticated()`: **toda a API exige login**, menos o que foi liberado acima. Por isso o `UppercaseController` não tem nenhuma linha de segurança: ele está protegido por padrão. É mais seguro do que listar o que proteger, porque um endpoint novo em `/api` já nasce protegido.
+- `anyRequest().permitAll()`: o que sobra, fora de `/api`, são os arquivos da tela (`index.html`, `.js`, `.css`), que o próprio Spring serve no `.jar` de produção (veja o [Módulo 3.7](#37-produção-um-jar-só)). A tela precisa ser pública, senão ninguém conseguiria nem ver o formulário de login. Os **dados** continuam protegidos, porque estão todos em `/api`.
 
 **O que acontece quando alguém sem login tenta acessar:**
 
@@ -838,7 +843,108 @@ Por que não chamar `http://localhost:8080` direto do Angular? Para o navegador,
 
 Com o proxy, para o navegador **tudo vem de `localhost:4200`**, e os dois problemas somem. No JSF essa questão nem existe, porque tela e backend saem do mesmo `.war`.
 
-**E em produção?** O proxy é só do `ng serve`, que é uma ferramenta de desenvolvimento. Em produção, a forma mais comum é colocar um servidor web (nginx, Apache) na frente, servindo os arquivos de `ng build` e repassando `/api` para o Spring. Outra opção é copiar os arquivos do `ng build` para `backend/src/main/resources/static/`, e então o próprio Spring serve tudo de uma origem só, como um `.war`.
+**E em produção?** O proxy é só do `ng serve`, que é uma ferramenta de desenvolvimento. Em produção, a tela e a API precisam continuar na mesma origem por outro caminho. É o assunto da próxima seção.
+
+### 3.7 Produção: um `.jar` só
+
+Em produção não existe `ng serve`. O Angular vira **arquivos estáticos** (`ng build` gera um `index.html`, um `.js` e um `.css` em `dist/hello-angular/browser/`), e este projeto coloca esses arquivos **dentro do `.jar` do Spring**. O resultado é parecido com um `.war` do JSF: um arquivo, um processo e uma porta, com a tela e a API na mesma origem.
+
+```mermaid
+flowchart LR
+    U([Navegador]) -- "HTTPS 443" --> X["Servidor web<br/>(nginx, Apache, IIS)<br/>certificado HTTPS"]
+    X -- "HTTP 127.0.0.1:8080<br/>+ X-Forwarded-Proto: https" --> J
+    subgraph J ["java -jar backend.jar (perfil prod)"]
+        T["/ → index.html, .js, .css<br/>(pasta static/ do .jar)"]
+        A["/api/... → controllers"]
+    end
+```
+
+#### Gerando o `.jar`
+
+```bash
+cd backend
+./mvnw -Pproducao package
+```
+
+O `-Pproducao` liga um **perfil do Maven** (a seção `<profiles>` do `pom.xml`). Sem ele, o build é só do backend, rápido, como no desenvolvimento. Com ele, acontece isto, na ordem:
+
+1. O **`frontend-maven-plugin`** baixa o Node.js para `backend/target/node/`. Não depende do Node instalado na máquina; é a mesma ideia do `mvnw` com o Maven.
+2. Ele roda `npm ci` na pasta do Angular: apaga o `node_modules` e instala exatamente as versões do `package-lock.json`. (Por isso, pare o `ng serve` antes de rodar este build.)
+3. Ele roda `npm run build` (o `ng build`), que gera `dist/hello-angular/browser/` com a configuração `production`: código minificado e nomes de arquivo com hash (`main-S4E3DC76.js`), para o navegador nunca usar uma versão antiga em cache.
+4. O **`maven-resources-plugin`** copia esses arquivos para `target/classes/static/`.
+5. O build segue normal: compila o Java, roda os testes e gera `target/backend-0.0.1-SNAPSHOT.jar`.
+
+O Spring Boot serve automaticamente tudo o que estiver em `static/` no classpath: `GET /` devolve o `static/index.html`. Não precisa de nenhum código para isso. Só foi preciso liberar esses arquivos no `SecurityConfig` (o `anyRequest().permitAll()`, veja [2.8](#28-spring-security)).
+
+#### Rodando
+
+```bash
+java -jar backend/target/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+```
+
+`--spring.profiles.active=prod` liga um **perfil do Spring**: além do `application.properties`, ele lê o `application-prod.properties`, cujas linhas têm prioridade. É como ter um `standalone.xml` diferente por ambiente. O que esse perfil muda:
+
+| Propriedade | Para quê |
+|---|---|
+| `server.address=127.0.0.1` | O Spring só aceita conexões da própria máquina, ou seja, do servidor web na frente. Ninguém de fora fala direto com ele |
+| `server.forward-headers-strategy=framework` | O servidor web avisa, no cabeçalho `X-Forwarded-Proto: https`, que o acesso original foi por HTTPS. Com isso o Spring enxerga a requisição como HTTPS (`request.isSecure()`). Só é seguro porque, pela linha anterior, só o servidor web chega ao Spring |
+| `server.servlet.session.cookie.secure=true` | O `JSESSIONID` ganha a marca `Secure`: o navegador só o envia por HTTPS |
+| `server.servlet.session.cookie.same-site=lax` | O navegador não envia o `JSESSIONID` em POSTs vindos de outros sites. É uma segunda barreira contra CSRF, além do token |
+| `server.servlet.session.timeout=30m` | A sessão expira depois de 30 minutos sem uso (o `session-timeout` do `web.xml`) |
+
+E o cookie `XSRF-TOKEN`? O `CookieCsrfTokenRepository` já marca o cookie como `Secure` sozinho quando a requisição é HTTPS. Com o `forward-headers-strategy`, ela passa a ser.
+
+Resultado, conferido com `curl` simulando o servidor web:
+
+```text
+Set-Cookie: XSRF-TOKEN=...; Path=/; Secure
+Set-Cookie: JSESSIONID=...; Path=/; Secure; HttpOnly; SameSite=Lax
+```
+
+> **Testando na própria máquina:** com o perfil `prod`, abra `http://localhost:8080/`. Funciona mesmo sem HTTPS, porque os navegadores tratam `localhost` como seguro e aceitam cookies `Secure` nele. Em qualquer outro endereço, sem HTTPS o login não se mantém, e é exatamente essa a proteção.
+
+#### O servidor web na frente
+
+Um exemplo de configuração do **nginx** (troque o domínio e os caminhos do certificado):
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name seu-dominio;
+    ssl_certificate     /etc/ssl/seu-dominio.crt;
+    ssl_certificate_key /etc/ssl/seu-dominio.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# Quem chegar por HTTP é mandado para HTTPS.
+server {
+    listen 80;
+    server_name seu-dominio;
+    return 301 https://$host$request_uri;
+}
+```
+
+| | Desenvolvimento | Produção |
+|---|---|---|
+| Angular | `ng serve`, porta 4200 | Arquivos dentro do `.jar` |
+| Spring | `./mvnw spring-boot:run`, porta 8080 | `java -jar`, porta 8080, só em `127.0.0.1` |
+| O usuário acessa | `http://localhost:4200` | `https://seu-dominio` (443) |
+| Portas abertas para fora | — | Só 443 (e 80, para redirecionar) |
+
+#### O que ainda falta para um sistema de verdade
+
+- **Usuários no banco** em vez de fixos no código, e **proteção contra força bruta** (limite de tentativas ou bloqueio de conta).
+- **Mais de uma instância.** A sessão fica na memória de cada processo. Com duas instâncias atrás de um balanceador, o usuário que entrou numa "cai" deslogado na outra. Isso se resolve com *sticky session* no balanceador ou com **Spring Session** (sessões no Redis ou no banco), o equivalente ao cluster com Infinispan do WildFly.
+- **Rotas do Angular.** Se um dia houver rotas (`/relatorios`), um F5 em `/relatorios` pediria ao Spring um arquivo que não existe. O servidor precisa devolver o `index.html` para essas URLs.
+- **Rodar como serviço** (systemd no Linux, serviço no Windows), para o `java -jar` subir sozinho e reiniciar se cair.
+
+**E o WildFly?** Dá para gerar um `.war` do Spring Boot e fazer deploy num servidor de aplicação. Mas este projeto usa Spring Boot 4, que exige Jakarta EE 11 (`jakarta.*`), e um WildFly antigo (Java EE 8, `javax.*`) não roda o projeto. O caminho normal do Spring Boot é o `.jar` com servidor embutido.
 
 ---
 
