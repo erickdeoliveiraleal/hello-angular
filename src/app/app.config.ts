@@ -15,7 +15,7 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes),
     provideHttpClient(withInterceptors([authInterceptor])),
-    // Recupera a sessão pelo cookie de refresh antes de mostrar a tela.
-    provideAppInitializer(() => inject(AuthService).restoreSession()),
+    // Se o app abriu na volta do login (?code=...), troca o código por tokens antes de mostrar a tela.
+    provideAppInitializer(() => inject(AuthService).handleRedirectCallback()),
   ]
 };

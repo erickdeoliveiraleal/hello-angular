@@ -42,15 +42,19 @@ if not exist "%RAIZ%node_modules" (
 )
 
 rem --- Subir ------------------------------------------------------------------
-echo Subindo o backend em http://localhost:8080 ...
+echo Subindo o servidor de autorizacao em http://localhost:9000 ...
+start "hello-angular auth-server" /d "%RAIZ%auth-server" cmd /k ""%RAIZ%auth-server\mvnw.cmd" spring-boot:run"
+
+echo Subindo o backend ^(API^) em http://localhost:8080 ...
 rem As janelas abertas pelo start herdam o JAVA_HOME definido acima.
 rem Caminho completo do mvnw.cmd: algumas configuracoes do Windows nao procuram programas na pasta atual.
 start "hello-angular backend" /d "%RAIZ%backend" cmd /k ""%RAIZ%backend\mvnw.cmd" spring-boot:run"
 
-echo Subindo o frontend em http://localhost:4200 ...
+rem O app roda em 127.0.0.1 (e nao localhost): o Spring Authorization Server nao aceita localhost no redirect_uri.
+echo Subindo o frontend em http://127.0.0.1:4200 ...
 start "hello-angular frontend" /d "%RAIZ%" cmd /k "npm start -- --open"
 
 echo.
-echo Pronto. O navegador abre sozinho quando o frontend terminar de compilar.
-echo O backend leva alguns segundos a mais para ficar disponivel.
+echo Pronto. O navegador abre sozinho em http://127.0.0.1:4200 quando o frontend terminar de compilar.
+echo O auth-server e o backend levam alguns segundos a mais para ficar disponiveis.
 endlocal

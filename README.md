@@ -36,11 +36,13 @@ Dê dois cliques em [`iniciar.bat`](iniciar.bat), ou rode no terminal:
 iniciar.bat
 ```
 
-Ele abre duas janelas: o backend (porta 8080) e o frontend (porta 4200), e o navegador abre sozinho quando o frontend termina de compilar. Para parar, feche as janelas ou use Ctrl+C nelas.
+Ele abre três janelas: o servidor de autorização (porta 9000), o backend (porta 8080) e o frontend (porta 4200). O navegador abre sozinho em **http://127.0.0.1:4200** quando o frontend termina de compilar. Para parar, feche as janelas ou use Ctrl+C nelas.
 
 O script também:
 - instala as dependências do frontend (`npm install`) se a pasta `node_modules` não existir;
 - se o `JAVA_HOME` estiver vazio ou apontar para um JDK que não existe mais, usa o JDK 17+ mais recente do Eclipse Adoptium, só para aquela execução.
+
+> Use **127.0.0.1**, não `localhost`: o Spring Authorization Server não aceita `localhost` no `redirect_uri`, então o app é registrado em `http://127.0.0.1:4200/`. O `angular.json` já faz o `ng serve` escutar nesse endereço.
 
 ## Development server
 
@@ -50,56 +52,99 @@ To start a local development server, run:
 ng serve
 ```
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+Once the server is running, open your browser and navigate to `http://127.0.0.1:4200/`. The application will automatically reload whenever you modify any of the source files.
 
-## Backend (Spring Boot)
-
-O backend fica em [`backend/`](backend) (Spring Boot 4.1.2, Java 17). Ele expõe um endpoint que recebe um nome e devolve em maiúsculas:
+## Arquitetura desta branch: Authorization Code + PKCE no Angular (`caminho-2-pkce`)
 
 ```
-POST /api/uppercase
-{ "name": "joão" }   ->   { "result": "JOÃO" }
+Navegador (Angular, 127.0.0.1:4200) — é o próprio cliente OAuth 2 (cliente público)
+   │  1. Entrar → /oauth2/authorize (com code_challenge)     → página de login do auth-server
+   │  2. volta com ?code=...  → POST /oauth2/token (com code_verifier) direto do navegador (CORS)
+   │  3. guarda access token e ID token em memória
+   │
+   ├──► auth-server/ (porta 9000) — Spring Authorization Server
+   └──► backend/ (porta 8080) — API: só aceita "Authorization: Bearer <JWT>"
 ```
 
-### Autenticação (JWT)
+### auth-server (Spring Authorization Server)
 
-`/api/uppercase` exige um access token JWT no header `Authorization: Bearer <token>`. O login é sem senha: basta um nome preenchido.
+Fica em [`auth-server/`](auth-server):
+- **Página de login própria, só com o campo de nome** ([`LoginController`](auth-server/src/main/java/com/example/authserver/LoginController.java), [`NameOnlyAuthenticationProvider`](auth-server/src/main/java/com/example/authserver/NameOnlyAuthenticationProvider.java)).
+- **Cliente registrado:** o próprio Angular (`client_id=angular`), um **cliente público**: o código roda no navegador, então não tem como guardar um segredo. No lugar do segredo, o **PKCE é obrigatório**.
+- **Sem refresh token:** o Spring Authorization Server não emite refresh token para clientes públicos. O access token (JWT, RS256) vale 1 minuto.
+- **CORS:** libera `http://127.0.0.1:4200`, porque o Angular chama o `/oauth2/token` direto do navegador. Outras origens são recusadas.
+- **OpenID Connect:** ID token, `/userinfo`, logout (`/connect/logout`) e `/.well-known/openid-configuration`.
 
-| Endpoint | Corpo | Resposta |
+### backend: só API
+
+`/api/uppercase` aceita apenas um access token JWT do auth-server (validado pela chave pública em `/oauth2/jwks`). Não tem login, sessão, cookie nem CSRF.
+
+```
+POST /api/uppercase   Authorization: Bearer <JWT>
+{ "name": "maria" }   ->   { "result": "MARIA", "user": "joana" }
+```
+
+### Angular
+
+- [`pkce.ts`](src/app/pkce.ts): sorteia o `code_verifier` e calcula o `code_challenge` (SHA-256, Base64URL), com a Web Crypto API do navegador.
+- [`auth.service.ts`](src/app/auth.service.ts):
+  1. **Entrar:** guarda `state` e `code_verifier` no `sessionStorage` (sobrevivem ao redirecionamento) e vai para o `/oauth2/authorize`.
+  2. **Volta do login:** ao abrir com `?code=...`, confere o `state`, troca o código por tokens no `/oauth2/token` apresentando o `code_verifier`, e limpa a URL.
+  3. **Sair:** apaga os tokens e vai ao `/connect/logout` do auth-server.
+- [`auth.interceptor.ts`](src/app/auth.interceptor.ts): coloca o `Authorization: Bearer` nas chamadas a `/api/`.
+- Os tokens ficam **em memória**: um F5 os perde. Como o auth-server ainda lembra do usuário (cookie de sessão dele), o próximo **Entrar** pega tokens novos sem pedir o nome.
+- **Token expirado:** sem refresh token, a API responde 401 e a tela pede para clicar em **Entrar** de novo (de novo sem pedir o nome).
+
+### Comparando com o caminho 1 (BFF)
+
+| | Caminho 1 (BFF) | Caminho 2 (PKCE no Angular) |
 |---|---|---|
-| `POST /api/auth/login` | `{ "name": "joão" }` | `{ "accessToken", "expiresIn", "user" }` + cookie `refresh_token` |
-| `POST /api/auth/refresh` | (vazio; usa o cookie) | um access token novo + cookie novo |
-| `POST /api/auth/logout` | (vazio; usa o cookie) | `204`, revoga o refresh token e apaga o cookie |
+| Quem é o cliente OAuth | o backend (confidencial, com segredo) | o Angular (público, sem segredo) |
+| Onde ficam os tokens | na sessão do servidor | na memória do navegador |
+| Um XSS consegue roubar tokens | não | sim (o access token) |
+| Refresh token | sim, usado pelo BFF | não |
+| F5 | continua logado | precisa clicar em Entrar (sem digitar o nome) |
+| Backend precisa de sessão e CSRF | sim | não |
 
-Os três exigem o header `X-Requested-With: XMLHttpRequest` (veja CSRF abaixo).
+As boas práticas atuais para aplicações no navegador (o documento "OAuth 2.0 for Browser-Based Applications", da IETF) preferem o BFF justamente por não deixar token nenhum no JavaScript.
 
-- **Access token:** JWT, vale 1 minuto (curto de propósito, para ver o refresh acontecer). Volta no JSON, fica só em memória no front e serve para chamar a API. O backend o valida só pela assinatura, sem consultar nada.
-- **Refresh token:** **não é JWT**. É uma string aleatória de 32 bytes (`SecureRandom`, 43 caracteres em Base64URL), sem conteúdo legível. Vale 1 dia e só serve para pedir um access token novo. **Nunca aparece no JSON:** vai num cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/auth`:
-  - `HttpOnly`: o JavaScript da página não consegue ler o cookie, então um XSS não rouba o refresh token.
-  - `Secure`: só trafega por HTTPS. Os navegadores tratam `http://localhost` como seguro, então funciona no `ng serve`.
-  - `SameSite=Strict`: não é enviado em requisições que partem de outro site.
-  - `Path=/api/auth`: só vai para os endpoints de autenticação, nunca para o resto da API.
-- **Lista de permitidos:** o servidor guarda cada refresh token emitido, mas **só o hash SHA-256** (se a "tabela" vazar, os tokens não podem ser usados). Só vale o refresh token que está guardado, não foi usado, não foi revogado e não expirou. O armazenamento fica atrás da interface [`RefreshTokenStore`](backend/src/main/java/com/example/backend/auth/RefreshTokenStore.java); a implementação atual é em memória, então reiniciar o backend desloga todo mundo. Trocar por banco ou Redis é criar outra implementação.
-- **Rotação com famílias:** cada login abre uma *família*. Cada refresh marca o token atual como usado e devolve um novo da mesma família. Se um token **já usado** aparecer de novo, é sinal de roubo (o cliente legítimo já tinha trocado por outro): a **família inteira é revogada**, e o ladrão e o usuário precisam fazer login de novo. O logout e um novo login também revogam a família.
-- **Limpeza:** de tempos em tempos (`app.jwt.refresh-cleanup-interval`, 10 minutos), os refresh tokens expirados são apagados da memória.
-- **CSRF:** como o navegador envia o cookie sozinho, outro site poderia tentar disparar `/api/auth/refresh`. Além do `SameSite=Strict`, o backend exige o header `X-Requested-With`, que um site de terceiros não consegue enviar sem passar pelo CORS.
-- O access token é assinado com HS256. A chave vem da variável de ambiente `JWT_SECRET` (Base64, 256 bits); sem ela, é usada uma chave de desenvolvimento que está no `application.properties`. **Em produção, sempre defina `JWT_SECRET`.**
-- Os tempos de validade ficam em `app.jwt.access-token-ttl` e `app.jwt.refresh-token-ttl`, no [`application.properties`](backend/src/main/resources/application.properties).
+### Detalhe: tolerância de relógio
 
-No front, o campo de nome serve de login. Ao clicar em **Cumprimentar**, o app entra com aquele nome (ou troca de usuário, se o nome mudou) e chama a API. O [`auth.interceptor.ts`](src/app/auth.interceptor.ts) coloca o access token em cada chamada. Se a API responder 401 porque o token expirou, ele chama `/api/auth/refresh` (o cookie vai junto) e repete a chamada.
+A API aceita um JWT até **60 segundos depois** do `exp` (padrão do Spring, para absorver diferença de relógio entre servidores). Por isso o access token "de 1 minuto" é recusado só depois de uns 2 minutos.
 
-Ao abrir ou recarregar a página (F5), o app chama `/api/auth/refresh`. Se o cookie ainda for válido, a sessão volta sem novo login. Sem cookie, essa chamada devolve 401 (aparece em vermelho no DevTools, mas é esperado) e o app abre deslogado. O botão **Sair** chama `/api/auth/logout`.
+### Rodar cada parte separadamente
 
-Para rodar (porta 8080), em outro terminal:
+Em três terminais:
+
+```bash
+cd auth-server
+./mvnw spring-boot:run
+```
 
 ```bash
 cd backend
 ./mvnw spring-boot:run
 ```
 
-No Windows (PowerShell ou cmd), use `.\mvnw.cmd spring-boot:run`. Para rodar os testes do backend: `./mvnw test`.
+```bash
+ng serve
+```
 
-O `ng serve` encaminha as chamadas a `/api` para `http://localhost:8080` via [`proxy.conf.json`](proxy.conf.json), então o front não precisa de CORS. Suba o backend e o `ng serve`; se o backend estiver parado, a tela mostra uma mensagem de erro ao clicar em **Cumprimentar**.
+No Windows, use `.\mvnw.cmd spring-boot:run`. Para os testes: `./mvnw test` em `auth-server/` e em `backend/`.
+
+## Outras versões da autenticação (branches)
+
+O mesmo app foi feito de outras formas, cada uma numa branch, para comparar:
+
+| Branch | Como funciona |
+|---|---|
+| `master` | sessão no servidor (`JSESSIONID`), sem OAuth |
+| `jwt-manual` | JWT feito à mão: access token JWT em memória + refresh token opaco em cookie `HttpOnly`, com rotação e famílias |
+| `caminho-1-bff` | Spring Authorization Server + BFF: login OAuth 2 no servidor de autorização; o backend guarda os tokens na sessão e o navegador só tem o `JSESSIONID` |
+| `caminho-2-pkce` | Spring Authorization Server + Angular com Authorization Code e PKCE: o próprio Angular recebe os tokens |
+| `caminho-3-grant-nome` | Spring Authorization Server com um *grant type* customizado, que troca o nome digitado por tokens |
+
+Para trocar de versão: `git switch <branch>` (pare os servidores antes e suba de novo depois).
 
 ## Code scaffolding
 

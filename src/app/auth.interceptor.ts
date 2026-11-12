@@ -1,29 +1,16 @@
-import { HttpErrorResponse, HttpInterceptorFn, HttpRequest } from '@angular/common/http';
+import { HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
-import { catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
 
-function withToken<T>(request: HttpRequest<T>, token: string | null): HttpRequest<T> {
-  return token ? request.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : request;
-}
-
 /**
- * Coloca o access token nas chamadas à API. Se o backend responder 401 (token expirado),
- * renova pelo cookie de refresh e repete a requisição uma vez.
+ * Coloca o access token nas chamadas à API (/api/...). As chamadas ao auth-server não levam token.
+ * Não há renovação automática: o cliente público não recebe refresh token. Quando o token expira,
+ * a API responde 401 e a tela pede para clicar em Entrar de novo.
  */
 export const authInterceptor: HttpInterceptorFn = (request, next) => {
-  if (request.url.startsWith('/api/auth/')) {
+  const token = inject(AuthService).accessToken();
+  if (!token || !request.url.startsWith('/api/')) {
     return next(request);
   }
-
-  const auth = inject(AuthService);
-  return next(withToken(request, auth.accessToken())).pipe(
-    catchError((error) => {
-      const unauthorized = error instanceof HttpErrorResponse && error.status === 401;
-      if (!unauthorized || !auth.user()) {
-        return throwError(() => error);
-      }
-      return auth.refresh().pipe(switchMap((token) => next(withToken(request, token))));
-    }),
-  );
+  return next(request.clone({ setHeaders: { Authorization: `Bearer ${token}` } }));
 };

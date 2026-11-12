@@ -1,28 +1,39 @@
 <h1>{{ greeting() }}</h1>
 <p>{{ title() }} rodando com Angular {{ version }}</p>
 
-<form (submit)="$event.preventDefault(); greet()">
-  <label for="name">Seu nome</label>
-  <input
-    id="name"
-    type="text"
-    placeholder="Digite seu nome"
-    [value]="name()"
-    (input)="name.set($any($event.target).value)"
-  />
-  <button type="submit">Cumprimentar</button>
-</form>
+@if (auth.user(); as user) {
+  <form (submit)="$event.preventDefault(); greet()">
+    <label for="name">Seu nome</label>
+    <input
+      id="name"
+      type="text"
+      placeholder="Digite seu nome"
+      [value]="name()"
+      (input)="name.set($any($event.target).value)"
+    />
+    <button type="submit">Cumprimentar</button>
+  </form>
+
+  <p class="status">
+    Autenticado como <strong>{{ user }}</strong> via Authorization Code + PKCE (os tokens estão no navegador)
+    <button type="button" (click)="logout()">Sair</button>
+  </p>
+  <p class="status">
+    Access token (em memória, no Angular) válido até {{ auth.expiresAt() | date: 'HH:mm:ss' }}
+    · refresh token: {{ auth.hasRefreshToken() ? 'recebido' : 'não recebido (cliente público)' }}
+    @if (apiCaller()) {
+      · a API recebeu o token de <strong>{{ apiCaller() }}</strong>
+    }
+  </p>
+} @else {
+  <p>
+    <button type="button" (click)="login()">Entrar</button>
+    <span class="status">Você vai para a página de login do servidor de autorização.</span>
+  </p>
+}
 
 @if (error()) {
   <p class="error">{{ error() }}</p>
-}
-
-@if (auth.user(); as user) {
-  <p class="status">
-    Autenticado como <strong>{{ user }}</strong> via JWT
-    (access token renovado {{ auth.refreshes() }} {{ auth.refreshes() === 1 ? 'vez' : 'vezes' }})
-    <button type="button" (click)="logout()">Sair</button>
-  </p>
 }
 
 <router-outlet />
