@@ -1,95 +1,62 @@
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { Observable, catchError, finalize, map, of, shareReplay, tap, throwError } from 'rxjs';
+import { Observable, catchError, finalize, map, of, tap } from 'rxjs';
 
-interface AccessTokenResponse {
-  accessToken: string;
-  expiresIn: number;
+interface MeResponse {
   user: string;
+  accessTokenExpiresAt: string;
 }
 
-/** Exigido pelo backend nos endpoints de autenticação (proteção contra CSRF). */
-const AUTH_HEADERS = new HttpHeaders({ 'X-Requested-With': 'XMLHttpRequest' });
-
 /**
- * O access token fica só em memória. O refresh token fica num cookie HttpOnly que o navegador
- * guarda e envia sozinho para /api/auth; este código nunca o vê.
- * O login é sem senha: basta um nome preenchido.
+ * Padrão BFF: o Angular não vê token nenhum. O login acontece na página do servidor de autorização,
+ * e o backend (BFF) guarda os tokens na sessão. O navegador só tem o cookie JSESSIONID (HttpOnly).
  */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);
 
-  private readonly accessTokenValue = signal<string | null>(null);
   private readonly userValue = signal<string | null>(null);
-  private readonly refreshCount = signal(0);
+  private readonly tokenExpiresAtValue = signal<Date | null>(null);
 
-  readonly accessToken = this.accessTokenValue.asReadonly();
   readonly user = this.userValue.asReadonly();
-  /** Quantas vezes o access token foi renovado nesta sessão. */
-  readonly refreshes = this.refreshCount.asReadonly();
+  /** Validade do access token que está guardado no servidor (o token em si nunca chega aqui). */
+  readonly tokenExpiresAt = this.tokenExpiresAtValue.asReadonly();
 
-  private refreshInFlight?: Observable<string>;
-
-  login(name: string): Observable<void> {
-    return this.http
-      .post<AccessTokenResponse>('/api/auth/login', { name }, { headers: AUTH_HEADERS })
-      .pipe(
-        tap((response) => {
-          this.store(response);
-          this.refreshCount.set(0);
-        }),
-        map(() => undefined),
-      );
+  /** Leva o navegador ao login OAuth 2: BFF -> página de login do auth-server -> volta para o app. */
+  login(): void {
+    window.location.href = '/oauth2/authorization/hello';
   }
 
-  /** Pede um access token novo. O cookie com o refresh token vai junto automaticamente. */
-  refresh(): Observable<string> {
-    this.refreshInFlight ??= this.http
-      .post<AccessTokenResponse>('/api/auth/refresh', null, { headers: AUTH_HEADERS })
-      .pipe(
-        tap((response) => {
-          this.store(response);
-          this.refreshCount.update((n) => n + 1);
-        }),
-        map((response) => response.accessToken),
-        catchError((error) => {
-          this.clearSession();
-          return throwError(() => error);
-        }),
-        finalize(() => (this.refreshInFlight = undefined)),
-        shareReplay(1),
-      );
-    return this.refreshInFlight;
-  }
-
-  /**
-   * Chamado ao abrir o app: se o navegador ainda tem o cookie de refresh, recupera a sessão
-   * (é o que faz o F5 não deslogar). Sem cookie, o backend responde 401 e o app abre deslogado.
-   */
-  restoreSession(): Observable<void> {
-    return this.refresh().pipe(
-      tap(() => this.refreshCount.set(0)),
+  /** Pergunta ao BFF quem está logado. Usado ao abrir a página (F5) e para atualizar a validade do token. */
+  refreshUser(): Observable<void> {
+    return this.http.get<MeResponse>('/bff/me').pipe(
+      tap((response) => {
+        this.userValue.set(response.user);
+        this.tokenExpiresAtValue.set(new Date(response.accessTokenExpiresAt));
+      }),
       map(() => undefined),
-      catchError(() => of(undefined)),
     );
   }
 
-  /** Revoga o refresh token no servidor e apaga o cookie. */
+  /** Ao abrir o app: sem sessão, o BFF responde 401 e o app abre deslogado. */
+  restoreSession(): Observable<void> {
+    return this.refreshUser().pipe(catchError(() => of(undefined)));
+  }
+
+  /**
+   * Encerra a sessão no BFF e depois navega até o auth-server para encerrar a sessão de lá também
+   * (senão o próximo "Entrar" logaria direto, sem pedir o nome).
+   */
   logout(): Observable<void> {
-    return this.http
-      .post<void>('/api/auth/logout', null, { headers: AUTH_HEADERS })
-      .pipe(finalize(() => this.clearSession()));
+    return this.http.post<{ redirectUrl: string }>('/logout', null).pipe(
+      tap((response) => (window.location.href = response.redirectUrl)),
+      map(() => undefined),
+      finalize(() => this.clearSession()),
+    );
   }
 
-  /** Limpa só o estado local (por exemplo, quando o servidor já recusou a sessão). */
   clearSession(): void {
-    this.accessTokenValue.set(null);
     this.userValue.set(null);
-  }
-
-  private store(response: AccessTokenResponse): void {
-    this.accessTokenValue.set(response.accessToken);
-    this.userValue.set(response.user);
+    this.tokenExpiresAtValue.set(null);
   }
 }

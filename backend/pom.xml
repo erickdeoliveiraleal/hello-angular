@@ -34,6 +34,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
+		<!-- BFF: faz o login OAuth 2 com o auth-server e guarda os tokens na sessão -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-oauth2-client</artifactId>
+		</dependency>
+		<!-- API: valida os access tokens (JWT) emitidos pelo auth-server -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
