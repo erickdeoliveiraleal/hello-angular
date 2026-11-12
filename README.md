@@ -28,6 +28,20 @@ npm install
 >
 > No PowerShell, se `ng` der erro de política de execução de scripts, use `ng.cmd` ou `npx ng`.
 
+## Subir tudo de uma vez (Windows)
+
+Dê dois cliques em [`iniciar.bat`](iniciar.bat), ou rode no terminal:
+
+```bash
+iniciar.bat
+```
+
+Ele abre duas janelas: o backend (porta 8080) e o frontend (porta 4200), e o navegador abre sozinho quando o frontend termina de compilar. Para parar, feche as janelas ou use Ctrl+C nelas.
+
+O script também:
+- instala as dependências do frontend (`npm install`) se a pasta `node_modules` não existir;
+- se o `JAVA_HOME` estiver vazio ou apontar para um JDK que não existe mais, usa o JDK 17+ mais recente do Eclipse Adoptium, só para aquela execução.
+
 ## Development server
 
 To start a local development server, run:

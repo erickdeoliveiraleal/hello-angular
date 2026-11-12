@@ -1,0 +1,3 @@
+# O cmd do Windows lê mal arquivos .bat com quebras de linha LF (labels e goto falham).
+*.bat text eol=crlf
+*.cmd text eol=crlf
