@@ -10,4 +10,12 @@ import { RouterOutlet } from '@angular/router';
 export class App {
   protected readonly title = signal('hello-angular');
   protected readonly version = VERSION.full;
+
+  protected readonly name = signal('');
+  protected readonly greeting = signal('Hello, World!');
+
+  protected greet(): void {
+    const name = this.name().trim();
+    this.greeting.set(`Hello, ${name || 'World'}!`);
+  }
 }

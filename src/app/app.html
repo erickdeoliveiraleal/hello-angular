@@ -1,4 +1,16 @@
-<h1>Hello, World!</h1>
+<h1>{{ greeting() }}</h1>
 <p>{{ title() }} rodando com Angular {{ version }}</p>
+
+<form (submit)="$event.preventDefault(); greet()">
+  <label for="name">Seu nome</label>
+  <input
+    id="name"
+    type="text"
+    placeholder="Digite seu nome"
+    [value]="name()"
+    (input)="name.set($any($event.target).value)"
+  />
+  <button type="submit">Cumprimentar</button>
+</form>
 
 <router-outlet />
