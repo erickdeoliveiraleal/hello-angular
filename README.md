@@ -47,6 +47,10 @@ O backend fica em [`backend/`](backend) (Spring Boot 4.1.2, Java 17). O login é
 | POST   | `/api/login`  | `{ "name": "Ana" }` cria a sessão e guarda o nome       |
 | GET    | `/api/me`     | `{ "name": "Ana" }` se houver sessão; senão 401          |
 | POST   | `/api/logout` | invalida a sessão (204)                                  |
+| GET    | `/api/publico/mensagem` | **desprotegido**: mensagem do backend, mesmo sem login |
+| GET    | `/api/protegido/hora-login` | **protegido**: `{ "name", "horaLogin" }`; sem sessão, 401 |
+
+Tudo em `/api/protegido/**` passa pelo `SessaoObrigatoriaInterceptor`, que devolve 401 se a sessão não tiver um nome. A página mostra a mensagem pública sempre e, depois de entrar, a hora do login.
 
 Para rodar (porta 8080), em outro terminal:
 

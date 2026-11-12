@@ -17,3 +17,17 @@ button {
 .error {
   color: #b00020;
 }
+
+.publico,
+.protegido {
+  padding: 6px 8px;
+  border-left: 4px solid;
+}
+
+.publico {
+  border-color: #2e7d32;
+}
+
+.protegido {
+  border-color: #1565c0;
+}
