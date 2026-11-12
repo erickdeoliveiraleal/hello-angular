@@ -58,6 +58,27 @@ No Windows (PowerShell ou cmd), use `.\mvnw.cmd spring-boot:run`. Para rodar os 
 
 O `ng serve` encaminha as chamadas a `/api` para `http://localhost:8080` via [`proxy.conf.json`](proxy.conf.json), então o front não precisa de CORS. Suba o backend e o `ng serve`; se o backend estiver parado, a tela mostra uma mensagem de erro ao clicar em **Cumprimentar**.
 
+### Login por sessão (JSESSIONID)
+
+Só para estudo: **sem senha**, basta digitar um nome. O servidor guarda o nome na sessão HTTP (`HttpSession`, a mesma API de servlet do WildFly) e o navegador fica com o cookie `JSESSIONID`, reenviado em toda chamada.
+
+| Método | Caminho       | O que faz                                        |
+| ------ | ------------- | ------------------------------------------------ |
+| POST   | `/api/login`  | `{ "name": "Ana" }` cria a sessão e guarda o nome |
+| GET    | `/api/me`     | `{ "name": "Ana" }` se houver sessão; senão 401    |
+| POST   | `/api/logout` | invalida a sessão (204)                            |
+
+Dá para testar sem tela, com o `curl` guardando o cookie num arquivo (`-c` grava, `-b` envia):
+
+```bash
+curl -i -c cookies.txt -H "Content-Type: application/json" -d '{"name":"Ana"}' http://localhost:8080/api/login
+curl -i -b cookies.txt http://localhost:8080/api/me
+curl -i -b cookies.txt -X POST http://localhost:8080/api/logout
+curl -i -b cookies.txt http://localhost:8080/api/me
+```
+
+A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 401 porque a sessão foi invalidada.
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
