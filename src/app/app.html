@@ -13,4 +13,8 @@
   <button type="submit">Cumprimentar</button>
 </form>
 
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
+
 <router-outlet />

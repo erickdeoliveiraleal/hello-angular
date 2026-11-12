@@ -5,6 +5,7 @@ This project was generated using [Angular CLI](https://github.com/angular/angula
 ## Pré-requisitos
 
 - Node.js `^22.22.3 || ^24.15.0 || >=26.0.0`
+- Java 17 ou superior, com `JAVA_HOME` apontando para o JDK (o Maven vem junto no projeto, via `mvnw`)
 - Angular CLI 22.2.5 instalado globalmente:
 
 ```bash
@@ -36,6 +37,26 @@ ng serve
 ```
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+
+## Backend (Spring Boot)
+
+O backend fica em [`backend/`](backend) (Spring Boot 4.1.2, Java 17). Ele expõe um endpoint que recebe um nome e devolve em maiúsculas:
+
+```
+POST /api/uppercase
+{ "name": "joão" }   ->   { "result": "JOÃO" }
+```
+
+Para rodar (porta 8080), em outro terminal:
+
+```bash
+cd backend
+./mvnw spring-boot:run
+```
+
+No Windows (PowerShell ou cmd), use `.\mvnw.cmd spring-boot:run`. Para rodar os testes do backend: `./mvnw test`.
+
+O `ng serve` encaminha as chamadas a `/api` para `http://localhost:8080` via [`proxy.conf.json`](proxy.conf.json), então o front não precisa de CORS. Suba o backend e o `ng serve`; se o backend estiver parado, a tela mostra uma mensagem de erro ao clicar em **Cumprimentar**.
 
 ## Code scaffolding
 
