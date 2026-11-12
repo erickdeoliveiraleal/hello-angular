@@ -81,6 +81,25 @@ POST /api/uppercase
 
 No front, o campo de nome serve de login. Ao clicar em **Cumprimentar**, o app entra com aquele nome (ou troca de usuário, se o nome mudou) e chama a API. Ao abrir ou recarregar a página (F5), o app chama `GET /api/auth/me`: se a sessão existe, continua logado; senão, recebe 401 (aparece em vermelho no DevTools, mas é esperado) e abre deslogado. O botão **Sair** chama `/api/auth/logout`.
 
+### Segunda porta de entrada: Bearer JWT (para um app móvel)
+
+Além da sessão do navegador, o backend aceita `Authorization: Bearer <jwt>`, pensado para um app nativo (Android, iOS), que não lida bem com cookie de sessão e CSRF.
+
+| Endpoint | Corpo | Resposta |
+|---|---|---|
+| `POST /api/mobile/token` | `{ "name": "joão" }` | `{ "accessToken": "...", "tokenType": "Bearer", "expiresIn": 900, "user": "joão" }` |
+
+Com o token, o app chama as **mesmas rotas** do navegador (`/api/uppercase`, `/api/auth/me`), mandando o header `Authorization: Bearer ...`.
+
+- **Duas `SecurityFilterChain`:** o Spring usa a primeira cujo `securityMatcher` aceitar a requisição. A [`MobileSecurityConfig`](backend/src/main/java/com/example/backend/auth/MobileSecurityConfig.java) (`@Order(1)`) pega quem manda `Bearer` ou chama `/api/mobile/**`; o resto cai na [`SecurityConfig`](backend/src/main/java/com/example/backend/auth/SecurityConfig.java) (`@Order(2)`, sessão). O Spring não sabe se o cliente é um celular: só olha como a requisição chega.
+- **Chain do app:** sem sessão (`STATELESS`, ignora um `JSESSIONID` enviado junto) e sem CSRF (não há cookie que o navegador mande sozinho). Valida assinatura, validade e emissor do JWT. Token ausente, inválido ou vencido: `401`.
+- **Versão mínima:** só access token (15 minutos), sem refresh token nem logout. Um app real precisaria de um refresh token, como o da branch `jwt-manual`, mas devolvido no JSON e guardado no Keystore do Android.
+
+```bash
+curl -X POST http://localhost:8080/api/mobile/token -H "Content-Type: application/json" -d '{"name":"joão"}'
+curl -X POST http://localhost:8080/api/uppercase -H "Authorization: Bearer <accessToken>" -H "Content-Type: application/json" -d '{"name":"joão"}'
+```
+
 ### Outras versões da autenticação (branches)
 
 O mesmo app foi feito de outras formas, cada uma numa branch, para comparar:

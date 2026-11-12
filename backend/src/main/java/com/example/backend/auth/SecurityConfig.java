@@ -2,6 +2,7 @@ package com.example.backend.auth;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -24,7 +25,12 @@ public class SecurityConfig {
 		return new HttpSessionSecurityContextRepository();
 	}
 
+	/**
+	 * Chain do navegador. É a {@code @Order(2)}: pega tudo o que a chain do app móvel
+	 * ({@link MobileSecurityConfig}, Bearer token) não pegou.
+	 */
 	@Bean
+	@Order(2)
 	SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityContextRepository securityContextRepository)
 			throws Exception {
 		http
