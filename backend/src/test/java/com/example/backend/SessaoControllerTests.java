@@ -26,6 +26,7 @@ class SessaoControllerTests {
 	void semSessaoMeDevolve401() throws Exception {
 		mockMvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
 	}
+
 	@Test
 	void loginGuardaOUsuarioNaSessao() throws Exception {
 		MockHttpSession sessao = login(" Erick ");
