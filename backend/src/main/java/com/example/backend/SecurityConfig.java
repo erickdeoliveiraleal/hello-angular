@@ -5,6 +5,8 @@ import java.io.IOException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
@@ -44,6 +46,15 @@ public class SecurityConfig {
 			.csrf(csrf -> csrf.spa())
 			.addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class);
 		return http.build();
+	}
+
+	/**
+	 * Quem o SessaoController chama para autenticar. Ele repassa a tentativa ao provider,
+	 * que decide; para trocar a regra (por exemplo, exigir senha), só se troca o provider.
+	 */
+	@Bean
+	AuthenticationManager authenticationManager(SomenteErickAuthenticationProvider provider) {
+		return new ProviderManager(provider);
 	}
 
 	/**

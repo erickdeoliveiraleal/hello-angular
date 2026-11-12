@@ -68,7 +68,9 @@ Só para estudo: **sem senha**, basta digitar um nome, mas **só o nome `erick` 
 | GET    | `/api/me`     | `{ "name": "erick" }` se houver sessão; senão 401                          |
 | POST   | `/api/logout` | invalida a sessão (204)                                                    |
 
-A regra fica num `if` em [`SessaoController`](backend/src/main/java/com/example/backend/SessaoController.java), com o nome fixo no código (`USUARIO_PERMITIDO`).
+A regra fica em [`SomenteErickAuthenticationProvider`](backend/src/main/java/com/example/backend/SomenteErickAuthenticationProvider.java), com o nome fixo no código (`USUARIO_PERMITIDO`). O controller não decide nada: ele pede ao `AuthenticationManager` do Spring Security para autenticar, e o manager consulta o provider. Se o provider lança `BadCredentialsException`, o controller responde 401.
+
+> **Histórico:** antes, a regra era um `if` no próprio `SessaoController`. Compare os dois com `git show` no commit *Troca o if do login por um AuthenticationProvider*: o comportamento é o mesmo, mas agora quem entra é decidido num componente próprio. Para exigir senha, por exemplo, bastaria trocar o provider, sem mexer no controller.
 
 Dá para testar sem tela, com o `curl` guardando os cookies num arquivo (`-c` grava, `-b` envia). Todo POST precisa do token CSRF (veja [Proteção contra CSRF](#proteção-contra-csrf)): primeiro uma chamada qualquer para receber o cookie `XSRF-TOKEN`, depois o mesmo valor no header `X-XSRF-TOKEN`:
 
@@ -130,6 +132,7 @@ No **Angular**, a tela inteira é um programa JavaScript que roda no navegador. 
 | `HttpServletRequest.getSession()`              | Igual; num managed bean, seria um `@SessionScoped`               |
 | `SecurityConfig` (Spring Security)             | `<security-constraint>` no `web.xml` / Jakarta Security          |
 | `.permitAll()` / `.authenticated()`            | URL fora / dentro de uma `<security-constraint>`                 |
+| `AuthenticationProvider` (quem pode entrar)    | `IdentityStore` do Jakarta Security / security realm do Elytron  |
 | `Authentication` recebido no controller        | `request.getUserPrincipal()` / `SecurityContext` do Jakarta      |
 | `./mvnw spring-boot:run` (servidor embutido)   | Gerar o `.war` e fazer deploy no WildFly                         |
 | `application.properties`                       | `standalone.xml` + `web.xml`                                     |
@@ -161,6 +164,7 @@ git show <hash>
 9. *Protege o endpoint de maiúsculas*: proteger mais um endpoint só mudando o caminho.
 10. *Troca o interceptor pelo Spring Security*: o mesmo comportamento feito pelo framework, mais a proteção contra CSRF.
 11. *Só o nome erick pode entrar (if no controller)*: um login que pode ser recusado.
+12. *Troca o if do login por um AuthenticationProvider*: a mesma regra no lugar que o Spring Security reserva para ela.
 
 ## Code scaffolding
 

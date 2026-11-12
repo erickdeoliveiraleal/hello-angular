@@ -1,12 +1,13 @@
 package com.example.backend;
 
 import java.time.Instant;
-import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
@@ -23,18 +24,18 @@ import jakarta.servlet.http.HttpSession;
 
 /**
  * Login "de estudo" com a sessão HTTP do servidor (cookie JSESSIONID).
- * Não há senha: só o nome "erick" pode entrar.
+ * Não há senha.
  *
- * Em vez de guardar o nome num atributo nosso, o login entrega ao Spring Security
- * um usuário autenticado, que ele guarda na mesma HttpSession. O logout é o do
- * próprio Spring (veja {@link SecurityConfig}).
+ * O controller não decide quem entra: ele pede ao AuthenticationManager do Spring
+ * Security, que consulta o {@link SomenteErickAuthenticationProvider}. O usuário
+ * autenticado fica guardado na HttpSession. O logout é o do próprio Spring
+ * (veja {@link SecurityConfig}).
  */
 @RestController
 @RequestMapping("/api")
 public class SessaoController {
 
 	static final String ATRIBUTO_HORA_LOGIN = "horaLogin";
-	static final String USUARIO_PERMITIDO = "erick";
 
 	public record LoginRequest(String name) {
 	}
@@ -42,8 +43,14 @@ public class SessaoController {
 	public record UsuarioResponse(String name) {
 	}
 
+	private final AuthenticationManager authenticationManager;
+
 	/** Guarda o usuário autenticado dentro da HttpSession. */
 	private final SecurityContextRepository contextRepository = new HttpSessionSecurityContextRepository();
+
+	public SessaoController(AuthenticationManager authenticationManager) {
+		this.authenticationManager = authenticationManager;
+	}
 
 	@PostMapping("/login")
 	public ResponseEntity<UsuarioResponse> login(@RequestBody LoginRequest request, HttpServletRequest http,
@@ -52,10 +59,15 @@ public class SessaoController {
 		if (nome.isEmpty()) {
 			return ResponseEntity.badRequest().build();
 		}
-		// Só um usuário pode entrar. Maiúsculas e minúsculas não importam.
-		if (!nome.equalsIgnoreCase(USUARIO_PERMITIDO)) {
+		// Quem decide é o Spring Security. Uma tentativa recusada vira exceção e 401.
+		Authentication usuario;
+		try {
+			usuario = authenticationManager.authenticate(UsernamePasswordAuthenticationToken.unauthenticated(nome, null));
+		}
+		catch (AuthenticationException recusado) {
 			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 		}
+
 		// Sessão nova a cada login (evita "session fixation").
 		HttpSession antiga = http.getSession(false);
 		if (antiga != null) {
@@ -64,14 +76,12 @@ public class SessaoController {
 		HttpSession sessao = http.getSession(true);
 		sessao.setAttribute(ATRIBUTO_HORA_LOGIN, Instant.now());
 
-		// Sem senha: o usuário já nasce autenticado, sem nenhum perfil (role).
-		Authentication usuario = UsernamePasswordAuthenticationToken.authenticated(nome, null, List.of());
 		SecurityContext context = SecurityContextHolder.createEmptyContext();
 		context.setAuthentication(usuario);
 		SecurityContextHolder.setContext(context);
 		contextRepository.saveContext(context, http, response);
 
-		return ResponseEntity.ok(new UsuarioResponse(nome));
+		return ResponseEntity.ok(new UsuarioResponse(usuario.getName()));
 	}
 
 	/** Quem está logado. Sem sessão o Spring Security já responde 401 antes de chegar aqui. */
