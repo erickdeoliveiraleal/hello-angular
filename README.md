@@ -53,15 +53,26 @@ POST /api/uppercase
 
 | Endpoint | Corpo | Resposta |
 |---|---|---|
-| `POST /api/auth/login` | `{ "name": "joão" }` | `{ "accessToken", "refreshToken", "expiresIn" }` |
-| `POST /api/auth/refresh` | `{ "refreshToken": "..." }` | um par novo de tokens |
+| `POST /api/auth/login` | `{ "name": "joão" }` | `{ "accessToken", "expiresIn", "user" }` + cookie `refresh_token` |
+| `POST /api/auth/refresh` | (vazio; usa o cookie) | um access token novo + cookie novo |
+| `POST /api/auth/logout` | (vazio; usa o cookie) | `204`, revoga o refresh token e apaga o cookie |
 
-- **Access token:** vale 1 minuto (curto de propósito, para ver o refresh acontecer). Só serve para chamar a API.
-- **Refresh token:** vale 1 dia e só serve para pedir um par novo. Cada refresh token pode ser usado **uma vez**; o backend guarda os já usados em memória, então essa lista zera quando ele reinicia.
+Os três exigem o header `X-Requested-With: XMLHttpRequest` (veja CSRF abaixo).
+
+- **Access token:** vale 1 minuto (curto de propósito, para ver o refresh acontecer). Volta no JSON, fica só em memória no front e serve para chamar a API.
+- **Refresh token:** vale 1 dia e só serve para pedir um access token novo. **Nunca aparece no JSON:** vai num cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/auth`:
+  - `HttpOnly`: o JavaScript da página não consegue ler o cookie, então um XSS não rouba o refresh token.
+  - `Secure`: só trafega por HTTPS. Os navegadores tratam `http://localhost` como seguro, então funciona no `ng serve`.
+  - `SameSite=Strict`: não é enviado em requisições que partem de outro site.
+  - `Path=/api/auth`: só vai para os endpoints de autenticação, nunca para o resto da API.
+- **Rotação:** cada refresh token pode ser usado **uma vez**, e cada refresh devolve um cookie novo. Um novo login e o logout revogam o token atual. A lista de revogados fica em memória e zera quando o backend reinicia.
+- **CSRF:** como o navegador envia o cookie sozinho, outro site poderia tentar disparar `/api/auth/refresh`. Além do `SameSite=Strict`, o backend exige o header `X-Requested-With`, que um site de terceiros não consegue enviar sem passar pelo CORS.
 - Os tokens são assinados com HS256. A chave vem da variável de ambiente `JWT_SECRET` (Base64, 256 bits); sem ela, é usada uma chave de desenvolvimento que está no `application.properties`. **Em produção, sempre defina `JWT_SECRET`.**
 - Os tempos de validade ficam em `app.jwt.access-token-ttl` e `app.jwt.refresh-token-ttl`, no [`application.properties`](backend/src/main/resources/application.properties).
 
-No front, o campo de nome serve de login. Ao clicar em **Cumprimentar**, o app entra com aquele nome (ou troca de usuário, se o nome mudou) e chama a API. O [`auth.interceptor.ts`](src/app/auth.interceptor.ts) coloca o token em cada chamada. Se a API responder 401 porque o token expirou, ele renova com o refresh token e repete a chamada. Os tokens ficam só em memória: recarregar a página exige um novo login.
+No front, o campo de nome serve de login. Ao clicar em **Cumprimentar**, o app entra com aquele nome (ou troca de usuário, se o nome mudou) e chama a API. O [`auth.interceptor.ts`](src/app/auth.interceptor.ts) coloca o access token em cada chamada. Se a API responder 401 porque o token expirou, ele chama `/api/auth/refresh` (o cookie vai junto) e repete a chamada.
+
+Ao abrir ou recarregar a página (F5), o app chama `/api/auth/refresh`. Se o cookie ainda for válido, a sessão volta sem novo login. Sem cookie, essa chamada devolve 401 (aparece em vermelho no DevTools, mas é esperado) e o app abre deslogado. O botão **Sair** chama `/api/auth/logout`.
 
 Para rodar (porta 8080), em outro terminal:
 

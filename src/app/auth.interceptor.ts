@@ -9,7 +9,7 @@ function withToken<T>(request: HttpRequest<T>, token: string | null): HttpReques
 
 /**
  * Coloca o access token nas chamadas à API. Se o backend responder 401 (token expirado),
- * renova com o refresh token e repete a requisição uma vez.
+ * renova pelo cookie de refresh e repete a requisição uma vez.
  */
 export const authInterceptor: HttpInterceptorFn = (request, next) => {
   if (request.url.startsWith('/api/auth/')) {
@@ -20,7 +20,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   return next(withToken(request, auth.accessToken())).pipe(
     catchError((error) => {
       const unauthorized = error instanceof HttpErrorResponse && error.status === 401;
-      if (!unauthorized || !auth.hasRefreshToken()) {
+      if (!unauthorized || !auth.user()) {
         return throwError(() => error);
       }
       return auth.refresh().pipe(switchMap((token) => next(withToken(request, token))));

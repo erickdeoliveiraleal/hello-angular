@@ -21,7 +21,8 @@ export class App {
   protected readonly title = signal('hello-angular');
   protected readonly version = VERSION.full;
 
-  protected readonly name = signal('');
+  // Se a sessão foi recuperada pelo cookie (F5), o campo já abre com o nome do usuário.
+  protected readonly name = signal(this.auth.user() ?? '');
   protected readonly greeting = signal('Hello, World!');
   protected readonly error = signal('');
 
@@ -42,13 +43,26 @@ export class App {
         },
         error: (error: unknown) => {
           if (error instanceof HttpErrorResponse && error.status === 401) {
-            this.auth.logout();
+            this.auth.clearSession();
             this.error.set('Sessão expirada. Clique em Cumprimentar para entrar de novo.');
           } else {
             this.error.set('Não foi possível falar com o backend. Ele está rodando?');
           }
         },
       });
+  }
+
+  protected logout(): void {
+    this.auth.logout().subscribe({
+      complete: () => this.resetScreen(),
+      error: () => this.resetScreen(),
+    });
+  }
+
+  private resetScreen(): void {
+    this.name.set('');
+    this.greeting.set('Hello, World!');
+    this.error.set('');
   }
 
   /** O próprio campo de nome serve de login: entra (ou troca de usuário) quando o nome muda. */

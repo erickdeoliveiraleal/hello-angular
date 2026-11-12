@@ -1,23 +1,26 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
-import { Observable, catchError, finalize, map, shareReplay, tap, throwError } from 'rxjs';
+import { Observable, catchError, finalize, map, of, shareReplay, tap, throwError } from 'rxjs';
 
-interface TokenResponse {
+interface AccessTokenResponse {
   accessToken: string;
-  refreshToken: string;
   expiresIn: number;
+  user: string;
 }
 
+/** Exigido pelo backend nos endpoints de autenticação (proteção contra CSRF). */
+const AUTH_HEADERS = new HttpHeaders({ 'X-Requested-With': 'XMLHttpRequest' });
+
 /**
- * Guarda os tokens só em memória: recarregar a página exige novo login.
- * O login é sem senha; basta um nome preenchido.
+ * O access token fica só em memória. O refresh token fica num cookie HttpOnly que o navegador
+ * guarda e envia sozinho para /api/auth; este código nunca o vê.
+ * O login é sem senha: basta um nome preenchido.
  */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly http = inject(HttpClient);
 
   private readonly accessTokenValue = signal<string | null>(null);
-  private readonly refreshTokenValue = signal<string | null>(null);
   private readonly userValue = signal<string | null>(null);
   private readonly refreshCount = signal(0);
 
@@ -29,33 +32,29 @@ export class AuthService {
   private refreshInFlight?: Observable<string>;
 
   login(name: string): Observable<void> {
-    return this.http.post<TokenResponse>('/api/auth/login', { name }).pipe(
-      tap((tokens) => {
-        this.store(tokens);
-        this.userValue.set(name);
-        this.refreshCount.set(0);
-      }),
-      map(() => undefined),
-    );
+    return this.http
+      .post<AccessTokenResponse>('/api/auth/login', { name }, { headers: AUTH_HEADERS })
+      .pipe(
+        tap((response) => {
+          this.store(response);
+          this.refreshCount.set(0);
+        }),
+        map(() => undefined),
+      );
   }
 
-  /** Troca o refresh token por um par novo. Chamadas simultâneas compartilham a mesma requisição. */
+  /** Pede um access token novo. O cookie com o refresh token vai junto automaticamente. */
   refresh(): Observable<string> {
-    const refreshToken = this.refreshTokenValue();
-    if (!refreshToken) {
-      return throwError(() => new Error('Sem refresh token'));
-    }
-
     this.refreshInFlight ??= this.http
-      .post<TokenResponse>('/api/auth/refresh', { refreshToken })
+      .post<AccessTokenResponse>('/api/auth/refresh', null, { headers: AUTH_HEADERS })
       .pipe(
-        tap((tokens) => {
-          this.store(tokens);
+        tap((response) => {
+          this.store(response);
           this.refreshCount.update((n) => n + 1);
         }),
-        map((tokens) => tokens.accessToken),
+        map((response) => response.accessToken),
         catchError((error) => {
-          this.logout();
+          this.clearSession();
           return throwError(() => error);
         }),
         finalize(() => (this.refreshInFlight = undefined)),
@@ -64,18 +63,33 @@ export class AuthService {
     return this.refreshInFlight;
   }
 
-  hasRefreshToken(): boolean {
-    return this.refreshTokenValue() !== null;
+  /**
+   * Chamado ao abrir o app: se o navegador ainda tem o cookie de refresh, recupera a sessão
+   * (é o que faz o F5 não deslogar). Sem cookie, o backend responde 401 e o app abre deslogado.
+   */
+  restoreSession(): Observable<void> {
+    return this.refresh().pipe(
+      tap(() => this.refreshCount.set(0)),
+      map(() => undefined),
+      catchError(() => of(undefined)),
+    );
   }
 
-  logout(): void {
+  /** Revoga o refresh token no servidor e apaga o cookie. */
+  logout(): Observable<void> {
+    return this.http
+      .post<void>('/api/auth/logout', null, { headers: AUTH_HEADERS })
+      .pipe(finalize(() => this.clearSession()));
+  }
+
+  /** Limpa só o estado local (por exemplo, quando o servidor já recusou a sessão). */
+  clearSession(): void {
     this.accessTokenValue.set(null);
-    this.refreshTokenValue.set(null);
     this.userValue.set(null);
   }
 
-  private store(tokens: TokenResponse): void {
-    this.accessTokenValue.set(tokens.accessToken);
-    this.refreshTokenValue.set(tokens.refreshToken);
+  private store(response: AccessTokenResponse): void {
+    this.accessTokenValue.set(response.accessToken);
+    this.userValue.set(response.user);
   }
 }

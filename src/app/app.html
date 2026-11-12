@@ -21,6 +21,7 @@
   <p class="status">
     Autenticado como <strong>{{ user }}</strong> via JWT
     (access token renovado {{ auth.refreshes() }} {{ auth.refreshes() === 1 ? 'vez' : 'vezes' }})
+    <button type="button" (click)="logout()">Sair</button>
   </p>
 }
 
