@@ -1,16 +1,29 @@
-<h1>{{ greeting() }}</h1>
+@if (usuario(); as nome) {
+  <h1>Hello, {{ nome }}!</h1>
+} @else {
+  <h1>Hello, World!</h1>
+}
 <p>{{ title() }} rodando com Angular {{ version }}</p>
 
-<form (submit)="$event.preventDefault(); greet()">
-  <label for="name">Seu nome</label>
-  <input
-    id="name"
-    type="text"
-    placeholder="Digite seu nome"
-    [value]="name()"
-    (input)="name.set($any($event.target).value)"
-  />
-  <button type="submit">Cumprimentar</button>
-</form>
+@if (usuario()) {
+  <p>Você está logado (sessão no servidor, cookie <code>JSESSIONID</code>).</p>
+  <button type="button" (click)="logout()">Sair</button>
+} @else {
+  <form (submit)="$event.preventDefault(); login()">
+    <label for="name">Seu nome</label>
+    <input
+      id="name"
+      type="text"
+      placeholder="Digite seu nome"
+      [value]="name()"
+      (input)="name.set($any($event.target).value)"
+    />
+    <button type="submit">Entrar</button>
+  </form>
+}
+
+@if (error()) {
+  <p class="error">{{ error() }}</p>
+}
 
 <router-outlet />

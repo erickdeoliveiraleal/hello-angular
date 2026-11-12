@@ -5,6 +5,7 @@ This project was generated using [Angular CLI](https://github.com/angular/angula
 ## Pré-requisitos
 
 - Node.js `^22.22.3 || ^24.15.0 || >=26.0.0`
+- Java 17 ou superior, com `JAVA_HOME` apontando para o JDK (o Maven vem junto no projeto, via `mvnw`)
 - Angular CLI 22.2.5 instalado globalmente:
 
 ```bash
@@ -36,6 +37,27 @@ ng serve
 ```
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+
+## Backend (Spring Boot) e login por sessão
+
+O backend fica em [`backend/`](backend) (Spring Boot 4.1.2, Java 17). O login é só para estudo: **sem senha**, basta digitar um nome. O servidor guarda o nome na sessão HTTP (`HttpSession`) e o navegador fica com o cookie `JSESSIONID`, que é reenviado em toda chamada.
+
+| Método | Caminho       | O que faz                                              |
+| ------ | ------------- | ------------------------------------------------------ |
+| POST   | `/api/login`  | `{ "name": "Ana" }` cria a sessão e guarda o nome       |
+| GET    | `/api/me`     | `{ "name": "Ana" }` se houver sessão; senão 401          |
+| POST   | `/api/logout` | invalida a sessão (204)                                  |
+
+Para rodar (porta 8080), em outro terminal:
+
+```bash
+cd backend
+./mvnw spring-boot:run
+```
+
+No Windows (PowerShell ou cmd), use `.\mvnw.cmd spring-boot:run`. Para rodar os testes do backend: `./mvnw test`.
+
+O `ng serve` encaminha as chamadas a `/api` para `http://localhost:8080` via [`proxy.conf.json`](proxy.conf.json). Como front e API ficam na mesma origem (`localhost:4200`), o cookie `JSESSIONID` funciona sem CORS. Depois de entrar, um F5 mantém o login: a tela chama `/api/me` ao abrir.
 
 ## Code scaffolding
 
