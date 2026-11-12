@@ -61,34 +61,39 @@ POST /api/uppercase
 { "name": "joão" }   ->   { "result": "JOÃO" }
 ```
 
-### Autenticação (JWT)
+### Autenticação (sessão no servidor, JSESSIONID)
 
-`/api/uppercase` exige um access token JWT no header `Authorization: Bearer <token>`. O login é sem senha: basta um nome preenchido.
+`/api/uppercase` exige um usuário logado. O login é sem senha: basta um nome preenchido.
 
 | Endpoint | Corpo | Resposta |
 |---|---|---|
-| `POST /api/auth/login` | `{ "name": "joão" }` | `{ "accessToken", "expiresIn", "user" }` + cookie `refresh_token` |
-| `POST /api/auth/refresh` | (vazio; usa o cookie) | um access token novo + cookie novo |
-| `POST /api/auth/logout` | (vazio; usa o cookie) | `204`, revoga o refresh token e apaga o cookie |
+| `POST /api/auth/login` | `{ "name": "joão" }` | `{ "user": "joão" }` e o cookie de sessão `JSESSIONID` |
+| `GET /api/auth/me` | — | `{ "user": "joão" }`, ou `401` se não há sessão |
+| `POST /api/auth/logout` | — | `204`, invalida a sessão e apaga o cookie |
 
-Os três exigem o header `X-Requested-With: XMLHttpRequest` (veja CSRF abaixo).
+- **Onde fica o usuário logado:** na `HttpSession`, **no servidor**. O navegador só tem o ID da sessão, no cookie `JSESSIONID`. Não há token nenhum no front.
+- **Cookie `JSESSIONID`:** `HttpOnly` (o JavaScript não lê), `Secure` (só HTTPS; os navegadores aceitam `http://localhost`) e `SameSite=Strict` (não vai em requisições vindas de outros sites). Veja o [`application.properties`](backend/src/main/resources/application.properties).
+- **Expiração:** a sessão expira depois de 15 minutos sem uso (`server.servlet.session.timeout`).
+- **Logout:** invalida a sessão **no servidor**, então vale na hora. Uma cópia do cookie deixa de funcionar imediatamente.
+- **Fixação de sessão:** no login, se já existia uma sessão, ela ganha um ID novo.
+- **CSRF:** como o navegador envia o cookie de sessão sozinho, toda requisição que altera algo (POST, PUT, DELETE) precisa do token CSRF. O backend usa `csrf.spa()` do Spring Security: o token vai num cookie `XSRF-TOKEN` (legível pelo JavaScript) e o `HttpClient` do Angular o devolve sozinho no header `X-XSRF-TOKEN`. Um site de terceiros não consegue ler esse cookie nem enviar o header. O [`CsrfCookieFilter`](backend/src/main/java/com/example/backend/auth/CsrfCookieFilter.java) garante que o cookie já venha na primeira resposta.
+- **Limitação:** a sessão fica em memória. Reiniciar o backend desloga todo mundo, e com mais de uma instância seria preciso compartilhar as sessões (por exemplo, com Spring Session e Redis).
 
-- **Access token:** JWT, vale 1 minuto (curto de propósito, para ver o refresh acontecer). Volta no JSON, fica só em memória no front e serve para chamar a API. O backend o valida só pela assinatura, sem consultar nada.
-- **Refresh token:** **não é JWT**. É uma string aleatória de 32 bytes (`SecureRandom`, 43 caracteres em Base64URL), sem conteúdo legível. Vale 1 dia e só serve para pedir um access token novo. **Nunca aparece no JSON:** vai num cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/auth`:
-  - `HttpOnly`: o JavaScript da página não consegue ler o cookie, então um XSS não rouba o refresh token.
-  - `Secure`: só trafega por HTTPS. Os navegadores tratam `http://localhost` como seguro, então funciona no `ng serve`.
-  - `SameSite=Strict`: não é enviado em requisições que partem de outro site.
-  - `Path=/api/auth`: só vai para os endpoints de autenticação, nunca para o resto da API.
-- **Lista de permitidos:** o servidor guarda cada refresh token emitido, mas **só o hash SHA-256** (se a "tabela" vazar, os tokens não podem ser usados). Só vale o refresh token que está guardado, não foi usado, não foi revogado e não expirou. O armazenamento fica atrás da interface [`RefreshTokenStore`](backend/src/main/java/com/example/backend/auth/RefreshTokenStore.java); a implementação atual é em memória, então reiniciar o backend desloga todo mundo. Trocar por banco ou Redis é criar outra implementação.
-- **Rotação com famílias:** cada login abre uma *família*. Cada refresh marca o token atual como usado e devolve um novo da mesma família. Se um token **já usado** aparecer de novo, é sinal de roubo (o cliente legítimo já tinha trocado por outro): a **família inteira é revogada**, e o ladrão e o usuário precisam fazer login de novo. O logout e um novo login também revogam a família.
-- **Limpeza:** de tempos em tempos (`app.jwt.refresh-cleanup-interval`, 10 minutos), os refresh tokens expirados são apagados da memória.
-- **CSRF:** como o navegador envia o cookie sozinho, outro site poderia tentar disparar `/api/auth/refresh`. Além do `SameSite=Strict`, o backend exige o header `X-Requested-With`, que um site de terceiros não consegue enviar sem passar pelo CORS.
-- O access token é assinado com HS256. A chave vem da variável de ambiente `JWT_SECRET` (Base64, 256 bits); sem ela, é usada uma chave de desenvolvimento que está no `application.properties`. **Em produção, sempre defina `JWT_SECRET`.**
-- Os tempos de validade ficam em `app.jwt.access-token-ttl` e `app.jwt.refresh-token-ttl`, no [`application.properties`](backend/src/main/resources/application.properties).
+No front, o campo de nome serve de login. Ao clicar em **Cumprimentar**, o app entra com aquele nome (ou troca de usuário, se o nome mudou) e chama a API. Ao abrir ou recarregar a página (F5), o app chama `GET /api/auth/me`: se a sessão existe, continua logado; senão, recebe 401 (aparece em vermelho no DevTools, mas é esperado) e abre deslogado. O botão **Sair** chama `/api/auth/logout`.
 
-No front, o campo de nome serve de login. Ao clicar em **Cumprimentar**, o app entra com aquele nome (ou troca de usuário, se o nome mudou) e chama a API. O [`auth.interceptor.ts`](src/app/auth.interceptor.ts) coloca o access token em cada chamada. Se a API responder 401 porque o token expirou, ele chama `/api/auth/refresh` (o cookie vai junto) e repete a chamada.
+### Outras versões da autenticação (branches)
 
-Ao abrir ou recarregar a página (F5), o app chama `/api/auth/refresh`. Se o cookie ainda for válido, a sessão volta sem novo login. Sem cookie, essa chamada devolve 401 (aparece em vermelho no DevTools, mas é esperado) e o app abre deslogado. O botão **Sair** chama `/api/auth/logout`.
+O mesmo app foi feito de outras formas, cada uma numa branch, para comparar:
+
+| Branch | Como funciona |
+|---|---|
+| `master` | sessão no servidor (`JSESSIONID`), descrita acima |
+| `jwt-manual` | JWT feito à mão: access token JWT em memória + refresh token opaco em cookie `HttpOnly`, com rotação e famílias |
+| `caminho-1-bff` | Spring Authorization Server + BFF: login OAuth 2 no servidor de autorização; o backend guarda os tokens na sessão e o navegador só tem o `JSESSIONID` |
+| `caminho-2-pkce` | Spring Authorization Server + Angular com Authorization Code e PKCE: o próprio Angular recebe os tokens |
+| `caminho-3-grant-nome` | Spring Authorization Server com um *grant type* customizado, que troca o nome digitado por tokens |
+
+Para trocar de versão: `git switch <branch>` (pare os servidores antes e suba de novo depois).
 
 Para rodar (porta 8080), em outro terminal:
 

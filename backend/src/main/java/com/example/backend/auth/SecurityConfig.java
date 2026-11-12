@@ -1,74 +1,55 @@
 package com.example.backend.auth;
 
-import java.time.Clock;
-import java.time.Duration;
-import java.util.Base64;
-
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
-
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.Customizer;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwtClaimValidator;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
-import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.authentication.logout.HttpStatusReturningLogoutSuccessHandler;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
 
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
-
+/**
+ * Autenticação por sessão no servidor (JSESSIONID). O usuário logado fica guardado na HttpSession;
+ * o navegador só tem o ID da sessão, num cookie HttpOnly.
+ */
 @Configuration
 public class SecurityConfig {
 
-	static final String TOKEN_TYPE_CLAIM = "token_type";
-	static final String ACCESS = "access";
+	@Bean
+	SecurityContextRepository securityContextRepository() {
+		return new HttpSessionSecurityContextRepository();
+	}
 
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+	SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityContextRepository securityContextRepository)
+			throws Exception {
 		http
-			// API sem sessão: o access token vai no header Authorization. O cookie de refresh só vale
-			// para /api/auth, que tem proteção própria contra CSRF (SameSite + X-Requested-With).
-			.csrf(csrf -> csrf.disable())
-			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+			.securityContext(context -> context.securityContextRepository(securityContextRepository))
+			// O cookie de sessão vai sozinho em toda requisição, então é preciso proteção contra CSRF.
+			// spa(): o token vai num cookie XSRF-TOKEN legível pelo Angular, que o devolve no header
+			// X-XSRF-TOKEN. Um site de terceiros não consegue ler esse cookie nem enviar o header.
+			.csrf(csrf -> csrf.spa())
+			.addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class)
 			.authorizeHttpRequests(auth -> auth
-				.requestMatchers("/api/auth/**", "/error").permitAll()
+				.requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+				.requestMatchers("/error").permitAll()
 				.anyRequest().authenticated())
-			.oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()));
+			// Não guarda a requisição negada na sessão (útil só em sites com página de login e redirecionamento).
+			// Sem isso, um simples 401 já criaria uma sessão vazia.
+			.requestCache(cache -> cache.disable())
+			// Sem sessão: 401 (e não um redirecionamento para uma página de login).
+			.exceptionHandling(exceptions -> exceptions
+				.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+			// POST /api/auth/logout invalida a sessão no servidor e apaga o cookie.
+			.logout(logout -> logout
+				.logoutUrl("/api/auth/logout")
+				.logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler(HttpStatus.NO_CONTENT))
+				.deleteCookies("JSESSIONID"));
 		return http.build();
-	}
-
-	@Bean
-	Clock clock() {
-		return Clock.systemUTC();
-	}
-
-	@Bean
-	SecretKey jwtSecretKey(JwtProperties properties) {
-		return new SecretKeySpec(Base64.getDecoder().decode(properties.secret()), "HmacSHA256");
-	}
-
-	@Bean
-	JwtEncoder jwtEncoder(SecretKey jwtSecretKey) {
-		return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSecretKey));
-	}
-
-	/** Valida os access tokens das requisições protegidas: assinatura, validade, emissor e tipo. */
-	@Bean
-	JwtDecoder jwtDecoder(SecretKey jwtSecretKey, JwtProperties properties) {
-		NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(jwtSecretKey).macAlgorithm(MacAlgorithm.HS256).build();
-		decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
-				new JwtTimestampValidator(Duration.ofSeconds(5)),
-				new JwtIssuerValidator(properties.issuer()),
-				new JwtClaimValidator<String>(TOKEN_TYPE_CLAIM, ACCESS::equals)));
-		return decoder;
 	}
 
 }
