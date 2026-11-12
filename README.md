@@ -92,6 +92,59 @@ Tudo em `/api/protegido/**` passa pelo `SessaoObrigatoriaInterceptor`, que devol
 
 O `/api/uppercase` continua público de propósito: ele vem de antes do login e fica fora de `/api/protegido/**`. Para protegê-lo, bastaria movê-lo para lá ou incluir o caminho no interceptor.
 
+## Para quem vem de JSF e WildFly
+
+### A diferença principal: onde a tela vive
+
+No **JSF**, o servidor monta o HTML de cada página. Ele guarda o estado da tela (ViewState) e os managed beans, e o navegador só exibe o resultado e envia os formulários.
+
+No **Angular**, a tela inteira é um programa JavaScript que roda no navegador. O servidor não gera HTML nenhum: ele só responde JSON em `/api/...`, como um serviço REST. Consequências:
+
+- **F5 apaga a memória da tela.** No JSF, um `@SessionScoped` continua lá depois do F5 e a página volta preenchida. Aqui a sessão também continua no servidor, mas a tela recomeça do zero e precisa *perguntar* quem está logado. É por isso que ela chama `/api/me` ao abrir.
+- **O servidor não sabe qual tela está aberta.** Ele só vê chamadas HTTP soltas. Navegação, validação de formulário e "o que mostrar" ficam no navegador.
+- **CSRF não vem de graça.** No JSF o ViewState funciona como um token contra CSRF. Aqui não há nada equivalente: este projeto de estudo não se protege contra isso. Num projeto real, o Spring Security resolve isso com um token próprio.
+
+### O que é igual ao que você já conhece
+
+- **A sessão é a mesma `HttpSession` do servlet,** com o mesmo cookie `JSESSIONID`. O Spring Boot traz um Tomcat embutido, que faz o papel do Undertow do WildFly. O pacote é o mesmo, `jakarta.servlet`.
+- **A sessão fica na memória do servidor:** reiniciar o backend desloga todo mundo, como no WildFly sem replicação de sessão.
+
+### Equivalências aproximadas
+
+| Neste projeto                                 | No mundo JSF / Jakarta EE                                       |
+| --------------------------------------------- | --------------------------------------------------------------- |
+| `@RestController` + `@GetMapping`              | Recurso JAX-RS (`@Path` + `@GET`)                                |
+| `HttpServletRequest.getSession()`              | Igual; num managed bean, seria um `@SessionScoped`               |
+| `SessaoObrigatoriaInterceptor`                 | Um `Filter` de servlet ou um `ContainerRequestFilter` do JAX-RS  |
+| `./mvnw spring-boot:run` (servidor embutido)   | Gerar o `.war` e fazer deploy no WildFly                         |
+| `application.properties`                       | `standalone.xml` + `web.xml`                                     |
+| Componente Angular (`app.ts` + `app.html`)     | Managed bean + página `.xhtml`                                   |
+| `signal(...)` lido no template com `{{ }}`     | Propriedade do bean lida com `#{...}`                            |
+| `(submit)="login()"`                          | `action="#{bean.login}"` num `h:commandButton`                   |
+| `@if (usuario()) { ... }`                      | `rendered="#{bean.usuario != null}"`                             |
+| `HttpClient.post('/api/login', ...)`           | O POST que o JSF faz sozinho ao enviar o formulário              |
+
+### Por que existe o `proxy.conf.json`
+
+Em desenvolvimento, o Angular (`ng serve`, porta 4200) e o Spring (porta 8080) rodam em processos separados. O proxy faz `/api` parecer vir da própria porta 4200. Assim o navegador trata tudo como um único site, envia o `JSESSIONID` normalmente e não esbarra em CORS. No JSF essa questão não existe, porque a tela e o backend saem do mesmo `.war`.
+
+### Ordem sugerida para estudar os commits
+
+```bash
+git log --reverse --oneline
+git show <hash>
+```
+
+1. *Hello World com Angular*: a estrutura de um projeto Angular.
+2. *Adiciona campo de texto e botão de cumprimento*: uma tela que reage a eventos, ainda sem servidor.
+3. *Adiciona backend Spring Boot com endpoint de maiúsculas*: um endpoint REST.
+4. *Frontend chama o backend*: o navegador falando JSON com o servidor.
+5. *Backend: login sem senha com sessão HTTP*: a sessão, testada com `curl`.
+6. *Frontend: tela de login usando a sessão*: a tela usando o cookie.
+7. *Endpoint público e endpoint protegido*: barrar quem não tem sessão.
+
+Próximo passo natural: trocar o interceptor feito à mão pelo **Spring Security**, que também cuida de CSRF.
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
