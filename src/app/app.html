@@ -1,8 +1,13 @@
 <h1>{{ greeting() }}</h1>
 <p>{{ title() }} rodando com Angular {{ version }}</p>
 
+<p class="publico">Endpoint público: {{ mensagemPublica() }}</p>
+
 @if (usuario()) {
   <p>Você está logado (sessão no servidor, cookie <code>JSESSIONID</code>).</p>
+  @if (horaLogin(); as hora) {
+    <p class="protegido">Endpoint protegido: login feito em {{ hora | date: 'dd/MM/yyyy HH:mm:ss' }}</p>
+  }
   <button type="button" (click)="logout()">Sair</button>
 } @else {
   <form (submit)="$event.preventDefault(); login()">

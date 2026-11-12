@@ -81,6 +81,17 @@ A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 4
 
 Na tela, o formulário **Entrar** chama `/api/login` e, depois, a saudação usa `/api/uppercase` para mostrar o nome em maiúsculas. Como o `ng serve` faz proxy de `/api`, front e API ficam na mesma origem (`localhost:4200`) e o navegador envia o `JSESSIONID` sozinho, sem CORS. Um F5 mantém o login: a tela chama `/api/me` ao abrir.
 
+### Endpoint público × endpoint protegido
+
+| Método | Caminho                     | Acesso                                                   |
+| ------ | --------------------------- | -------------------------------------------------------- |
+| GET    | `/api/publico/mensagem`     | **público**: `{ "mensagem": ... }`, mesmo sem login        |
+| GET    | `/api/protegido/hora-login` | **protegido**: `{ "name", "horaLogin" }`; sem sessão, 401 |
+
+Tudo em `/api/protegido/**` passa pelo `SessaoObrigatoriaInterceptor`, que devolve 401 se a sessão não tiver um nome. A hora do login é gravada na sessão por `/api/login`. A página mostra a mensagem pública sempre e, depois de entrar, a hora do login.
+
+O `/api/uppercase` continua público de propósito: ele vem de antes do login e fica fora de `/api/protegido/**`. Para protegê-lo, bastaria movê-lo para lá ou incluir o caminho no interceptor.
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:

@@ -1,5 +1,7 @@
 package com.example.backend;
 
+import java.time.Instant;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,6 +21,7 @@ import jakarta.servlet.http.HttpSession;
 public class SessaoController {
 
 	static final String ATRIBUTO_NOME = "nome";
+	static final String ATRIBUTO_HORA_LOGIN = "horaLogin";
 
 	public record LoginRequest(String name) {
 	}
@@ -39,6 +42,7 @@ public class SessaoController {
 		}
 		HttpSession sessao = http.getSession(true);
 		sessao.setAttribute(ATRIBUTO_NOME, nome);
+		sessao.setAttribute(ATRIBUTO_HORA_LOGIN, Instant.now());
 		return ResponseEntity.ok(new UsuarioResponse(nome));
 	}
 
