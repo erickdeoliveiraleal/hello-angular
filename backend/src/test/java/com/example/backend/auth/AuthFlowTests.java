@@ -1,5 +1,9 @@
 package com.example.backend.auth;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -11,15 +15,23 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.web.server.ResponseStatusException;
 
-import com.jayway.jsonpath.JsonPath;
+import com.example.backend.auth.AuthServerClient.Tokens;
 
 import jakarta.servlet.http.Cookie;
 
+/**
+ * Testa o backend sem o auth-server de verdade: o {@link AuthServerClient} é simulado. O fluxo com o
+ * auth-server está nos testes do próprio auth-server e no teste no navegador.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 class AuthFlowTests {
@@ -29,136 +41,109 @@ class AuthFlowTests {
 	@Autowired
 	private MockMvc mockMvc;
 
-	@Autowired
-	private TokenService tokenService;
+	@MockitoBean
+	private AuthServerClient authServer;
+
+	/** Lê o "sub" dos tokens simulados (no real, valida a assinatura com a chave do auth-server). */
+	@MockitoBean
+	private JwtDecoder jwtDecoder;
 
 	@Test
 	void loginDevolveAccessTokenNoJsonERefreshTokenEmCookieProtegido() throws Exception {
+		given(authServer.tokensForName("joão")).willReturn(new Tokens("access-1", "refresh-1", 60));
+		givenSubject("access-1", "joão");
+
 		login("joão", null)
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.accessToken").isString())
+			.andExpect(jsonPath("$.accessToken").value("access-1"))
 			.andExpect(jsonPath("$.expiresIn").value(60))
 			.andExpect(jsonPath("$.user").value("joão"))
 			.andExpect(jsonPath("$.refreshToken").doesNotExist())
-			.andExpect(cookie().exists(COOKIE))
+			.andExpect(cookie().value(COOKIE, "refresh-1"))
 			.andExpect(cookie().httpOnly(COOKIE, true))
 			.andExpect(cookie().secure(COOKIE, true))
 			.andExpect(cookie().sameSite(COOKIE, "Strict"))
-			.andExpect(cookie().path(COOKIE, "/api/auth"))
-			.andExpect(cookie().maxAge(COOKIE, 86400));
+			.andExpect(cookie().path(COOKIE, "/api/auth"));
 	}
 
 	@Test
-	void refreshTokenEhOpacoENaoJwt() throws Exception {
-		String refresh = refreshCookie(login("joão", null));
-		// 32 bytes em Base64URL sem padding = 43 caracteres, sem os pontos de um JWT.
-		org.assertj.core.api.Assertions.assertThat(refresh).matches("[A-Za-z0-9_-]{43}");
-	}
-
-	@Test
-	void reusoDeRefreshTokenRevogaAFamiliaInteira() throws Exception {
-		String original = refreshCookie(login("joão", null));
-		String rotated = refreshCookie(refresh(original).andExpect(status().isOk()));
-
-		// O token original reaparece: provável roubo. Recusa e derruba a família.
-		refresh(original).andExpect(status().isUnauthorized());
-		// Até o token mais novo, que era legítimo, deixou de valer.
-		refresh(rotated).andExpect(status().isUnauthorized());
-	}
-
-	@Test
-	void loginComNomeVazioDevolve400() throws Exception {
+	void loginComNomeVazioDevolve400SemChamarOAuthServer() throws Exception {
 		login("   ", null).andExpect(status().isBadRequest());
+		then(authServer).shouldHaveNoInteractions();
 	}
 
 	@Test
-	void endpointsDeAuthSemHeaderAntiCsrfDevolvem403() throws Exception {
+	void semHeaderAntiCsrfDevolve403() throws Exception {
 		mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"joão\"}"))
 			.andExpect(status().isForbidden());
-		String refresh = refreshCookie(login("joão", null));
-		mockMvc.perform(post("/api/auth/refresh").cookie(new Cookie(COOKIE, refresh)))
-			.andExpect(status().isForbidden());
-		mockMvc.perform(post("/api/auth/logout").cookie(new Cookie(COOKIE, refresh)))
-			.andExpect(status().isForbidden());
 	}
 
 	@Test
-	void uppercaseSemTokenDevolve401() throws Exception {
-		uppercase(null, "joão").andExpect(status().isUnauthorized());
+	void novoLoginRevogaORefreshTokenAnterior() throws Exception {
+		given(authServer.tokensForName("maria")).willReturn(new Tokens("access-2", "refresh-2", 60));
+		givenSubject("access-2", "maria");
+
+		login("maria", "refresh-antigo").andExpect(status().isOk());
+
+		then(authServer).should().revoke("refresh-antigo");
 	}
 
 	@Test
-	void uppercaseComAccessTokenDevolveMaiusculas() throws Exception {
-		String access = accessToken(login("joão", null));
-		uppercase(access, "joão")
+	void refreshPeloCookieDevolveTokensNovos() throws Exception {
+		given(authServer.refresh("refresh-1")).willReturn(new Tokens("access-2", "refresh-2", 60));
+		givenSubject("access-2", "joão");
+
+		refresh("refresh-1")
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.result").value("JOÃO"));
-	}
-
-	@Test
-	void refreshTokenNaoServeComoAccessToken() throws Exception {
-		String refresh = refreshCookie(login("joão", null));
-		uppercase(refresh, "joão").andExpect(status().isUnauthorized());
-	}
-
-	@Test
-	void accessTokenExpiradoDevolve401() throws Exception {
-		Instant past = Instant.now().minusSeconds(120);
-		String expired = tokenService.encodeAccessToken("joão", past.minusSeconds(60), past);
-		uppercase(expired, "joão").andExpect(status().isUnauthorized());
-	}
-
-	@Test
-	void refreshPeloCookieGeraNovosTokensEUsoRepetidoEhRecusado() throws Exception {
-		String refresh = refreshCookie(login("joão", null));
-
-		ResultActions refreshed = refresh(refresh)
-			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.accessToken").value("access-2"))
 			.andExpect(jsonPath("$.user").value("joão"))
-			.andExpect(cookie().exists(COOKIE));
-		uppercase(accessToken(refreshed), "maria")
-			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.result").value("MARIA"));
-
-		refresh(refresh).andExpect(status().isUnauthorized());
+			.andExpect(cookie().value(COOKIE, "refresh-2"));
 	}
 
 	@Test
-	void refreshSemCookieDevolve401() throws Exception {
-		mockMvc.perform(post("/api/auth/refresh").header(AuthController.CSRF_HEADER, AuthController.CSRF_HEADER_VALUE))
-			.andExpect(status().isUnauthorized());
+	void refreshRecusadoPeloAuthServerDevolve401() throws Exception {
+		given(authServer.refresh(anyString()))
+			.willThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "recusado"));
+
+		refresh("refresh-usado").andExpect(status().isUnauthorized());
 	}
 
 	@Test
-	void accessTokenNaoServeComoRefreshToken() throws Exception {
-		String access = accessToken(login("joão", null));
-		refresh(access).andExpect(status().isUnauthorized());
-	}
-
-	@Test
-	void logoutApagaOCookieERevogaORefreshToken() throws Exception {
-		String refresh = refreshCookie(login("joão", null));
-
+	void logoutRevogaNoAuthServerEApagaOCookie() throws Exception {
 		mockMvc.perform(post("/api/auth/logout")
 				.header(AuthController.CSRF_HEADER, AuthController.CSRF_HEADER_VALUE)
-				.cookie(new Cookie(COOKIE, refresh)))
+				.cookie(new Cookie(COOKIE, "refresh-1")))
 			.andExpect(status().isNoContent())
-			.andExpect(cookie().maxAge(COOKIE, 0))
-			.andExpect(cookie().value(COOKIE, ""));
+			.andExpect(cookie().maxAge(COOKIE, 0));
 
-		refresh(refresh).andExpect(status().isUnauthorized());
+		then(authServer).should().revoke("refresh-1");
 	}
 
 	@Test
-	void novoLoginRevogaASessaoAnterior() throws Exception {
-		String first = refreshCookie(login("joão", null));
-		login("maria", first).andExpect(status().isOk());
+	void apiSemTokenDevolve401EComTokenDevolveMaiusculas() throws Exception {
+		mockMvc.perform(post("/api/uppercase").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"joão\"}"))
+			.andExpect(status().isUnauthorized());
 
-		refresh(first).andExpect(status().isUnauthorized());
+		mockMvc.perform(post("/api/uppercase")
+				.with(jwt().jwt(token -> token.subject("joão")))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"maria\"}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.result").value("MARIA"))
+			.andExpect(jsonPath("$.user").value("joão"));
+	}
+
+	private void givenSubject(String accessToken, String subject) {
+		given(jwtDecoder.decode(accessToken)).willReturn(Jwt.withTokenValue(accessToken)
+			.header("alg", "RS256")
+			.subject(subject)
+			.issuedAt(Instant.now())
+			.expiresAt(Instant.now().plusSeconds(60))
+			.build());
 	}
 
 	private ResultActions login(String name, String currentRefreshToken) throws Exception {
-		MockHttpServletRequestBuilder request = post("/api/auth/login")
+		var request = post("/api/auth/login")
 			.header(AuthController.CSRF_HEADER, AuthController.CSRF_HEADER_VALUE)
 			.contentType(MediaType.APPLICATION_JSON)
 			.content("{\"name\":\"" + name + "\"}");
@@ -172,24 +157,6 @@ class AuthFlowTests {
 		return mockMvc.perform(post("/api/auth/refresh")
 			.header(AuthController.CSRF_HEADER, AuthController.CSRF_HEADER_VALUE)
 			.cookie(new Cookie(COOKIE, refreshToken)));
-	}
-
-	private ResultActions uppercase(String accessToken, String name) throws Exception {
-		MockHttpServletRequestBuilder request = post("/api/uppercase")
-			.contentType(MediaType.APPLICATION_JSON)
-			.content("{\"name\":\"" + name + "\"}");
-		if (accessToken != null) {
-			request.header("Authorization", "Bearer " + accessToken);
-		}
-		return mockMvc.perform(request);
-	}
-
-	private static String accessToken(ResultActions result) throws Exception {
-		return JsonPath.read(result.andReturn().getResponse().getContentAsString(), "$.accessToken");
-	}
-
-	private static String refreshCookie(ResultActions result) {
-		return result.andReturn().getResponse().getCookie(COOKIE).getValue();
 	}
 
 }

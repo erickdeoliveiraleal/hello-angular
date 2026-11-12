@@ -2,10 +2,12 @@ package com.example.backend.auth;
 
 import java.time.Duration;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,11 +16,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.example.backend.auth.TokenService.IssuedTokens;
+import com.example.backend.auth.AuthServerClient.Tokens;
 
 /**
- * Login, refresh e logout. O access token volta no JSON; o refresh token só trafega num cookie
- * HttpOnly, que o JavaScript da página não consegue ler.
+ * Login, refresh e logout para o Angular. Os tokens são emitidos pelo auth-server; este controller só
+ * os repassa: o access token no JSON e o refresh token num cookie HttpOnly (o JavaScript não lê).
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -39,13 +41,18 @@ public class AuthController {
 	public record AccessTokenResponse(String accessToken, long expiresIn, String user) {
 	}
 
-	private final TokenService tokenService;
+	private final AuthServerClient authServer;
+	private final JwtDecoder jwtDecoder;
+	private final Duration refreshCookieMaxAge;
 
-	public AuthController(TokenService tokenService) {
-		this.tokenService = tokenService;
+	public AuthController(AuthServerClient authServer, JwtDecoder jwtDecoder,
+			@Value("${app.refresh-cookie-max-age}") Duration refreshCookieMaxAge) {
+		this.authServer = authServer;
+		this.jwtDecoder = jwtDecoder;
+		this.refreshCookieMaxAge = refreshCookieMaxAge;
 	}
 
-	/** Login sem senha: basta informar um nome não vazio. Se já havia uma sessão, ela é revogada. */
+	/** Login sem senha: o nome vai para o auth-server (grant customizado), que devolve os tokens. */
 	@PostMapping("/login")
 	public ResponseEntity<AccessTokenResponse> login(@RequestBody LoginRequest request,
 			@RequestHeader(name = CSRF_HEADER, required = false) String csrfHeader,
@@ -55,9 +62,9 @@ public class AuthController {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe um nome");
 		}
 		if (currentRefreshToken != null) {
-			tokenService.revoke(currentRefreshToken);
+			authServer.revoke(currentRefreshToken);
 		}
-		return withRefreshCookie(tokenService.issue(request.name().trim()));
+		return withRefreshCookie(authServer.tokensForName(request.name().trim()));
 	}
 
 	@PostMapping("/refresh")
@@ -68,7 +75,7 @@ public class AuthController {
 		if (refreshToken == null || refreshToken.isBlank()) {
 			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sem sessão");
 		}
-		return withRefreshCookie(tokenService.refresh(refreshToken));
+		return withRefreshCookie(authServer.refresh(refreshToken));
 	}
 
 	@PostMapping("/logout")
@@ -76,18 +83,20 @@ public class AuthController {
 			@CookieValue(name = REFRESH_COOKIE, required = false) String refreshToken) {
 		requireCsrfHeader(csrfHeader);
 		if (refreshToken != null) {
-			tokenService.revoke(refreshToken);
+			authServer.revoke(refreshToken);
 		}
 		return ResponseEntity.noContent()
 			.header(HttpHeaders.SET_COOKIE, refreshCookie("", Duration.ZERO).toString())
 			.build();
 	}
 
-	private ResponseEntity<AccessTokenResponse> withRefreshCookie(IssuedTokens tokens) {
-		ResponseCookie cookie = refreshCookie(tokens.refreshToken(), tokenService.refreshTokenTtl());
+	private ResponseEntity<AccessTokenResponse> withRefreshCookie(Tokens tokens) {
+		// O nome do usuário é o "sub" do access token (validado com a chave pública do auth-server).
+		String user = jwtDecoder.decode(tokens.accessToken()).getSubject();
+		ResponseCookie cookie = refreshCookie(tokens.refreshToken(), refreshCookieMaxAge);
 		return ResponseEntity.ok()
 			.header(HttpHeaders.SET_COOKIE, cookie.toString())
-			.body(new AccessTokenResponse(tokens.accessToken(), tokens.expiresIn(), tokens.user()));
+			.body(new AccessTokenResponse(tokens.accessToken(), tokens.expiresIn(), user));
 	}
 
 	private static ResponseCookie refreshCookie(String value, Duration maxAge) {

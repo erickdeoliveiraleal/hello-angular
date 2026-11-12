@@ -19,7 +19,7 @@
 
 @if (auth.user(); as user) {
   <p class="status">
-    Autenticado como <strong>{{ user }}</strong> via JWT
+    Autenticado como <strong>{{ user }}</strong> via JWT do Spring Authorization Server (grant de nome)
     (access token renovado {{ auth.refreshes() }} {{ auth.refreshes() === 1 ? 'vez' : 'vezes' }})
     <button type="button" (click)="logout()">Sair</button>
   </p>
