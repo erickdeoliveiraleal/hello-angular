@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, signal, VERSION } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 
 @Component({
@@ -9,4 +9,5 @@ import { RouterOutlet } from '@angular/router';
 })
 export class App {
   protected readonly title = signal('hello-angular');
+  protected readonly version = VERSION.full;
 }
