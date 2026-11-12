@@ -35,12 +35,12 @@ class LoginDepoisDoLogoutHttpTests {
 	void entrarSairEEntrarDeNovoSemRecarregar() throws Exception {
 		assertThat(get("/api/publico/mensagem")).isEqualTo(200);
 
-		assertThat(post("/api/login", "{\"name\":\"erick\",\"password\":\"estudo123\"}")).isEqualTo(200);
+		assertThat(post("/api/login", "{\"name\":\"erick\",\"password\":\"Erick\"}")).isEqualTo(200);
 		assertThat(post("/api/logout", "")).isEqualTo(204);
 
 		// O logout precisa deixar um token CSRF novo, senão o próximo POST leva 403.
 		assertThat(tokenCsrf()).isNotEmpty();
-		assertThat(post("/api/login", "{\"name\":\"erick\",\"password\":\"estudo123\"}")).isEqualTo(200);
+		assertThat(post("/api/login", "{\"name\":\"erick\",\"password\":\"Erick\"}")).isEqualTo(200);
 	}
 
 	private int get(String caminho) throws Exception {

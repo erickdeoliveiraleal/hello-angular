@@ -533,7 +533,7 @@ Um efeito colateral: como existe um `AuthenticationManager` declarado, o Spring 
 @Configuration
 public class UsuariosConfig {
 
-    static final String HASH_SENHA_ERICK = "{bcrypt}$2a$10$bI6poxmO...";
+    static final String HASH_SENHA_ERICK = "{bcrypt}$2a$10$ss93esKc...";
 
     @Bean
     UserDetailsService usuarios() {

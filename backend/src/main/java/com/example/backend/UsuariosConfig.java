@@ -22,7 +22,7 @@ public class UsuariosConfig {
 	 * se uma senha digitada gera o mesmo resultado. O prefixo {bcrypt} diz qual algoritmo
 	 * foi usado.
 	 */
-	static final String HASH_SENHA_ERICK = "{bcrypt}$2a$10$bI6poxmOAqI/JP4M2LssQOTWKYdzYPAM4YCUZI9dp3KzQ6mNPLWTa";
+	static final String HASH_SENHA_ERICK = "{bcrypt}$2a$10$ss93esKcWmsySgpx0qcRKeQaSc/gzj24SvYmsDdeSed2bCmoSgw5e";
 
 	/**
 	 * De onde vêm os usuários. Aqui, uma lista fixa em memória com um usuário só.

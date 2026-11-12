@@ -66,9 +66,9 @@ O login pede **usuário e senha**. Há um único usuário, fixo no código, só 
 
 | Usuário | Senha de estudo |
 | ------- | --------------- |
-| `erick` | `estudo123`     |
+| `erick` | `Erick`         |
 
-O nome do usuário não diferencia maiúsculas; a senha, sim. O servidor guarda o usuário na sessão HTTP (`HttpSession`, a mesma API de servlet do WildFly) e o navegador fica com o cookie `JSESSIONID`, reenviado em toda chamada.
+O nome do usuário não diferencia maiúsculas (`erick`, `Erick` e `ERICK` são o mesmo usuário); a senha, sim (só `Erick`, com E maiúsculo, entra). O servidor guarda o usuário na sessão HTTP (`HttpSession`, a mesma API de servlet do WildFly) e o navegador fica com o cookie `JSESSIONID`, reenviado em toda chamada.
 
 | Método | Caminho       | O que faz                                                                                  |
 | ------ | ------------- | ------------------------------------------------------------------------------------------ |
@@ -93,7 +93,7 @@ Dá para testar sem tela, com o `curl` guardando os cookies num arquivo (`-c` gr
 ```bash
 curl -s -o /dev/null -c cookies.txt http://localhost:8080/api/publico/mensagem
 TOKEN=$(grep XSRF-TOKEN cookies.txt | cut -f7)
-curl -i -b cookies.txt -c cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -H "Content-Type: application/json" -d '{"name":"erick","password":"estudo123"}' http://localhost:8080/api/login
+curl -i -b cookies.txt -c cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -H "Content-Type: application/json" -d '{"name":"erick","password":"Erick"}' http://localhost:8080/api/login
 curl -i -b cookies.txt http://localhost:8080/api/me
 curl -i -b cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -X POST http://localhost:8080/api/logout
 curl -i -b cookies.txt http://localhost:8080/api/me

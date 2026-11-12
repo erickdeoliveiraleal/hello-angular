@@ -21,7 +21,7 @@ import org.springframework.test.web.servlet.ResultActions;
 class SessaoControllerTests {
 
 	/** Senha de estudo do usuário erick (o código de produção só tem o hash). */
-	private static final String SENHA = "estudo123";
+	private static final String SENHA = "Erick";
 
 	@Autowired
 	private MockMvc mockMvc;
@@ -58,6 +58,11 @@ class SessaoControllerTests {
 			.andReturn().getRequest().getSession(false);
 
 		assertThat(sessao).isNull();
+	}
+
+	@Test
+	void senhaDiferenciaMaiusculas() throws Exception {
+		tentarLogin("erick", SENHA.toLowerCase()).andExpect(status().isUnauthorized());
 	}
 
 	@Test
