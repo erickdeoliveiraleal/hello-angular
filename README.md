@@ -2,6 +2,8 @@
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.2.5.
 
+> 📘 **Novo em Angular e Spring Boot?** O [CURSO.md](CURSO.md) explica o projeto inteiro como um curso: arquitetura, cada classe, cada anotação e os fluxos de login passo a passo, comparando com JSF e WildFly.
+
 ## Pré-requisitos
 
 - Node.js `^22.22.3 || ^24.15.0 || >=26.0.0`
