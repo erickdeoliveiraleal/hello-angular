@@ -29,11 +29,11 @@ class SessaoControllerTests {
 
 	@Test
 	void loginGuardaOUsuarioNaSessao() throws Exception {
-		MockHttpSession sessao = login(" João ");
+		MockHttpSession sessao = login(" Erick ");
 
 		mockMvc.perform(get("/api/me").session(sessao))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.name").value("João"));
+			.andExpect(jsonPath("$.name").value("Erick"));
 	}
 
 	@Test
@@ -45,16 +45,27 @@ class SessaoControllerTests {
 	}
 
 	@Test
+	void nomeNaoAutorizadoDevolve401ESemSessao() throws Exception {
+		MockHttpSession sessao = (MockHttpSession) mockMvc.perform(post("/api/login").with(csrf())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"Ana\"}"))
+			.andExpect(status().isUnauthorized())
+			.andReturn().getRequest().getSession(false);
+
+		assertThat(sessao).isNull();
+	}
+
+	@Test
 	void loginSemTokenCsrfDevolve403() throws Exception {
 		mockMvc.perform(post("/api/login")
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"name\":\"Ana\"}"))
+				.content("{\"name\":\"erick\"}"))
 			.andExpect(status().isForbidden());
 	}
 
 	@Test
 	void logoutInvalidaASessao() throws Exception {
-		MockHttpSession sessao = login("Ana");
+		MockHttpSession sessao = login("erick");
 
 		mockMvc.perform(post("/api/logout").with(csrf()).session(sessao)).andExpect(status().isNoContent());
 

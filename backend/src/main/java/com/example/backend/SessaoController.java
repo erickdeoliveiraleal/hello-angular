@@ -3,6 +3,7 @@ package com.example.backend;
 import java.time.Instant;
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -22,7 +23,7 @@ import jakarta.servlet.http.HttpSession;
 
 /**
  * Login "de estudo" com a sessão HTTP do servidor (cookie JSESSIONID).
- * Não há senha: quem digitar um nome fica logado com ele.
+ * Não há senha: só o nome "erick" pode entrar.
  *
  * Em vez de guardar o nome num atributo nosso, o login entrega ao Spring Security
  * um usuário autenticado, que ele guarda na mesma HttpSession. O logout é o do
@@ -33,6 +34,7 @@ import jakarta.servlet.http.HttpSession;
 public class SessaoController {
 
 	static final String ATRIBUTO_HORA_LOGIN = "horaLogin";
+	static final String USUARIO_PERMITIDO = "erick";
 
 	public record LoginRequest(String name) {
 	}
@@ -49,6 +51,10 @@ public class SessaoController {
 		String nome = request.name() == null ? "" : request.name().trim();
 		if (nome.isEmpty()) {
 			return ResponseEntity.badRequest().build();
+		}
+		// Só um usuário pode entrar. Maiúsculas e minúsculas não importam.
+		if (!nome.equalsIgnoreCase(USUARIO_PERMITIDO)) {
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
 		}
 		// Sessão nova a cada login (evita "session fixation").
 		HttpSession antiga = http.getSession(false);

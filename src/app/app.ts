@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, inject, OnInit, signal, VERSION } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { RouterOutlet } from '@angular/router';
 
 interface NameResponse {
@@ -63,7 +63,12 @@ export class App implements OnInit {
         this.name.set('');
         this.entrou(u.name);
       },
-      error: () => this.error.set('Não foi possível falar com o backend. Ele está rodando?'),
+      error: (erro: HttpErrorResponse) =>
+        this.error.set(
+          erro.status === 401
+            ? 'Usuário não autorizado.'
+            : 'Não foi possível falar com o backend. Ele está rodando?',
+        ),
     });
   }
 

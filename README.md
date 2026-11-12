@@ -60,26 +60,28 @@ O `ng serve` encaminha as chamadas a `/api` para `http://localhost:8080` via [`p
 
 ### Login por sessão (JSESSIONID)
 
-Só para estudo: **sem senha**, basta digitar um nome. O servidor guarda o nome na sessão HTTP (`HttpSession`, a mesma API de servlet do WildFly) e o navegador fica com o cookie `JSESSIONID`, reenviado em toda chamada.
+Só para estudo: **sem senha**, basta digitar um nome, mas **só o nome `erick` entra** (maiúsculas e minúsculas não importam). O servidor guarda o nome na sessão HTTP (`HttpSession`, a mesma API de servlet do WildFly) e o navegador fica com o cookie `JSESSIONID`, reenviado em toda chamada.
 
-| Método | Caminho       | O que faz                                        |
-| ------ | ------------- | ------------------------------------------------ |
-| POST   | `/api/login`  | `{ "name": "Ana" }` cria a sessão e guarda o nome |
-| GET    | `/api/me`     | `{ "name": "Ana" }` se houver sessão; senão 401    |
-| POST   | `/api/logout` | invalida a sessão (204)                            |
+| Método | Caminho       | O que faz                                                                |
+| ------ | ------------- | ------------------------------------------------------------------------ |
+| POST   | `/api/login`  | `{ "name": "erick" }` cria a sessão; outro nome dá 401; nome vazio, 400   |
+| GET    | `/api/me`     | `{ "name": "erick" }` se houver sessão; senão 401                          |
+| POST   | `/api/logout` | invalida a sessão (204)                                                    |
+
+A regra fica num `if` em [`SessaoController`](backend/src/main/java/com/example/backend/SessaoController.java), com o nome fixo no código (`USUARIO_PERMITIDO`).
 
 Dá para testar sem tela, com o `curl` guardando os cookies num arquivo (`-c` grava, `-b` envia). Todo POST precisa do token CSRF (veja [Proteção contra CSRF](#proteção-contra-csrf)): primeiro uma chamada qualquer para receber o cookie `XSRF-TOKEN`, depois o mesmo valor no header `X-XSRF-TOKEN`:
 
 ```bash
 curl -s -o /dev/null -c cookies.txt http://localhost:8080/api/publico/mensagem
 TOKEN=$(grep XSRF-TOKEN cookies.txt | cut -f7)
-curl -i -b cookies.txt -c cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -H "Content-Type: application/json" -d '{"name":"Ana"}' http://localhost:8080/api/login
+curl -i -b cookies.txt -c cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -H "Content-Type: application/json" -d '{"name":"erick"}' http://localhost:8080/api/login
 curl -i -b cookies.txt http://localhost:8080/api/me
 curl -i -b cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -X POST http://localhost:8080/api/logout
 curl -i -b cookies.txt http://localhost:8080/api/me
 ```
 
-A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 401 porque a sessão foi invalidada. Sem o header `X-XSRF-TOKEN`, o login dá 403.
+A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 401 porque a sessão foi invalidada. Sem o header `X-XSRF-TOKEN`, o login dá 403. Com outro nome no lugar de `erick`, dá 401 e nenhuma sessão é criada.
 
 Na tela, o formulário **Entrar** chama `/api/login` e, depois, a saudação usa `/api/protegido/uppercase` para mostrar o nome em maiúsculas. Como o `ng serve` faz proxy de `/api`, front e API ficam na mesma origem (`localhost:4200`) e o navegador envia o `JSESSIONID` sozinho, sem CORS. Um F5 mantém o login: a tela chama `/api/me` ao abrir.
 
@@ -158,6 +160,7 @@ git show <hash>
 8. *README: guia para quem vem de JSF e WildFly*: este guia.
 9. *Protege o endpoint de maiúsculas*: proteger mais um endpoint só mudando o caminho.
 10. *Troca o interceptor pelo Spring Security*: o mesmo comportamento feito pelo framework, mais a proteção contra CSRF.
+11. *Só o nome erick pode entrar (if no controller)*: um login que pode ser recusado.
 
 ## Code scaffolding
 
