@@ -1,5 +1,6 @@
 package com.example.backend.auth;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Base64;
 
@@ -29,12 +30,12 @@ public class SecurityConfig {
 
 	static final String TOKEN_TYPE_CLAIM = "token_type";
 	static final String ACCESS = "access";
-	static final String REFRESH = "refresh";
 
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		http
-			// API sem sessão nem cookies: o token vai no header Authorization, então CSRF não se aplica.
+			// API sem sessão: o access token vai no header Authorization. O cookie de refresh só vale
+			// para /api/auth, que tem proteção própria contra CSRF (SameSite + X-Requested-With).
 			.csrf(csrf -> csrf.disable())
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(auth -> auth
@@ -42,6 +43,11 @@ public class SecurityConfig {
 				.anyRequest().authenticated())
 			.oauth2ResourceServer(resourceServer -> resourceServer.jwt(Customizer.withDefaults()));
 		return http.build();
+	}
+
+	@Bean
+	Clock clock() {
+		return Clock.systemUTC();
 	}
 
 	@Bean
@@ -54,18 +60,14 @@ public class SecurityConfig {
 		return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSecretKey));
 	}
 
-	/** Decoder usado pelo Spring Security nas requisições protegidas: só aceita access tokens. */
+	/** Valida os access tokens das requisições protegidas: assinatura, validade, emissor e tipo. */
 	@Bean
 	JwtDecoder jwtDecoder(SecretKey jwtSecretKey, JwtProperties properties) {
-		return decoderFor(jwtSecretKey, properties, ACCESS);
-	}
-
-	static NimbusJwtDecoder decoderFor(SecretKey key, JwtProperties properties, String tokenType) {
-		NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
+		NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(jwtSecretKey).macAlgorithm(MacAlgorithm.HS256).build();
 		decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
 				new JwtTimestampValidator(Duration.ofSeconds(5)),
 				new JwtIssuerValidator(properties.issuer()),
-				new JwtClaimValidator<String>(TOKEN_TYPE_CLAIM, tokenType::equals)));
+				new JwtClaimValidator<String>(TOKEN_TYPE_CLAIM, ACCESS::equals)));
 		return decoder;
 	}
 

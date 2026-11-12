@@ -59,15 +59,17 @@ POST /api/uppercase
 
 Os três exigem o header `X-Requested-With: XMLHttpRequest` (veja CSRF abaixo).
 
-- **Access token:** vale 1 minuto (curto de propósito, para ver o refresh acontecer). Volta no JSON, fica só em memória no front e serve para chamar a API.
-- **Refresh token:** vale 1 dia e só serve para pedir um access token novo. **Nunca aparece no JSON:** vai num cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/auth`:
+- **Access token:** JWT, vale 1 minuto (curto de propósito, para ver o refresh acontecer). Volta no JSON, fica só em memória no front e serve para chamar a API. O backend o valida só pela assinatura, sem consultar nada.
+- **Refresh token:** **não é JWT**. É uma string aleatória de 32 bytes (`SecureRandom`, 43 caracteres em Base64URL), sem conteúdo legível. Vale 1 dia e só serve para pedir um access token novo. **Nunca aparece no JSON:** vai num cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/auth`:
   - `HttpOnly`: o JavaScript da página não consegue ler o cookie, então um XSS não rouba o refresh token.
   - `Secure`: só trafega por HTTPS. Os navegadores tratam `http://localhost` como seguro, então funciona no `ng serve`.
   - `SameSite=Strict`: não é enviado em requisições que partem de outro site.
   - `Path=/api/auth`: só vai para os endpoints de autenticação, nunca para o resto da API.
-- **Rotação:** cada refresh token pode ser usado **uma vez**, e cada refresh devolve um cookie novo. Um novo login e o logout revogam o token atual. A lista de revogados fica em memória e zera quando o backend reinicia.
+- **Lista de permitidos:** o servidor guarda cada refresh token emitido, mas **só o hash SHA-256** (se a "tabela" vazar, os tokens não podem ser usados). Só vale o refresh token que está guardado, não foi usado, não foi revogado e não expirou. O armazenamento fica atrás da interface [`RefreshTokenStore`](backend/src/main/java/com/example/backend/auth/RefreshTokenStore.java); a implementação atual é em memória, então reiniciar o backend desloga todo mundo. Trocar por banco ou Redis é criar outra implementação.
+- **Rotação com famílias:** cada login abre uma *família*. Cada refresh marca o token atual como usado e devolve um novo da mesma família. Se um token **já usado** aparecer de novo, é sinal de roubo (o cliente legítimo já tinha trocado por outro): a **família inteira é revogada**, e o ladrão e o usuário precisam fazer login de novo. O logout e um novo login também revogam a família.
+- **Limpeza:** de tempos em tempos (`app.jwt.refresh-cleanup-interval`, 10 minutos), os refresh tokens expirados são apagados da memória.
 - **CSRF:** como o navegador envia o cookie sozinho, outro site poderia tentar disparar `/api/auth/refresh`. Além do `SameSite=Strict`, o backend exige o header `X-Requested-With`, que um site de terceiros não consegue enviar sem passar pelo CORS.
-- Os tokens são assinados com HS256. A chave vem da variável de ambiente `JWT_SECRET` (Base64, 256 bits); sem ela, é usada uma chave de desenvolvimento que está no `application.properties`. **Em produção, sempre defina `JWT_SECRET`.**
+- O access token é assinado com HS256. A chave vem da variável de ambiente `JWT_SECRET` (Base64, 256 bits); sem ela, é usada uma chave de desenvolvimento que está no `application.properties`. **Em produção, sempre defina `JWT_SECRET`.**
 - Os tempos de validade ficam em `app.jwt.access-token-ttl` e `app.jwt.refresh-token-ttl`, no [`application.properties`](backend/src/main/resources/application.properties).
 
 No front, o campo de nome serve de login. Ao clicar em **Cumprimentar**, o app entra com aquele nome (ou troca de usuário, se o nome mudou) e chama a API. O [`auth.interceptor.ts`](src/app/auth.interceptor.ts) coloca o access token em cada chamada. Se a API responder 401 porque o token expirou, ele chama `/api/auth/refresh` (o cookie vai junto) e repete a chamada.

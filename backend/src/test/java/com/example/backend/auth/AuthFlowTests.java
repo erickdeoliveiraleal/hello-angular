@@ -49,6 +49,24 @@ class AuthFlowTests {
 	}
 
 	@Test
+	void refreshTokenEhOpacoENaoJwt() throws Exception {
+		String refresh = refreshCookie(login("joão", null));
+		// 32 bytes em Base64URL sem padding = 43 caracteres, sem os pontos de um JWT.
+		org.assertj.core.api.Assertions.assertThat(refresh).matches("[A-Za-z0-9_-]{43}");
+	}
+
+	@Test
+	void reusoDeRefreshTokenRevogaAFamiliaInteira() throws Exception {
+		String original = refreshCookie(login("joão", null));
+		String rotated = refreshCookie(refresh(original).andExpect(status().isOk()));
+
+		// O token original reaparece: provável roubo. Recusa e derruba a família.
+		refresh(original).andExpect(status().isUnauthorized());
+		// Até o token mais novo, que era legítimo, deixou de valer.
+		refresh(rotated).andExpect(status().isUnauthorized());
+	}
+
+	@Test
 	void loginComNomeVazioDevolve400() throws Exception {
 		login("   ", null).andExpect(status().isBadRequest());
 	}
@@ -86,7 +104,7 @@ class AuthFlowTests {
 	@Test
 	void accessTokenExpiradoDevolve401() throws Exception {
 		Instant past = Instant.now().minusSeconds(120);
-		String expired = tokenService.encode("joão", SecurityConfig.ACCESS, past.minusSeconds(60), past);
+		String expired = tokenService.encodeAccessToken("joão", past.minusSeconds(60), past);
 		uppercase(expired, "joão").andExpect(status().isUnauthorized());
 	}
 
