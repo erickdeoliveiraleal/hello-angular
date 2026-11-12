@@ -68,16 +68,18 @@ Só para estudo: **sem senha**, basta digitar um nome. O servidor guarda o nome 
 | GET    | `/api/me`     | `{ "name": "Ana" }` se houver sessão; senão 401    |
 | POST   | `/api/logout` | invalida a sessão (204)                            |
 
-Dá para testar sem tela, com o `curl` guardando o cookie num arquivo (`-c` grava, `-b` envia):
+Dá para testar sem tela, com o `curl` guardando os cookies num arquivo (`-c` grava, `-b` envia). Todo POST precisa do token CSRF (veja [Proteção contra CSRF](#proteção-contra-csrf)): primeiro uma chamada qualquer para receber o cookie `XSRF-TOKEN`, depois o mesmo valor no header `X-XSRF-TOKEN`:
 
 ```bash
-curl -i -c cookies.txt -H "Content-Type: application/json" -d '{"name":"Ana"}' http://localhost:8080/api/login
+curl -s -o /dev/null -c cookies.txt http://localhost:8080/api/publico/mensagem
+TOKEN=$(grep XSRF-TOKEN cookies.txt | cut -f7)
+curl -i -b cookies.txt -c cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -H "Content-Type: application/json" -d '{"name":"Ana"}' http://localhost:8080/api/login
 curl -i -b cookies.txt http://localhost:8080/api/me
-curl -i -b cookies.txt -X POST http://localhost:8080/api/logout
+curl -i -b cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -X POST http://localhost:8080/api/logout
 curl -i -b cookies.txt http://localhost:8080/api/me
 ```
 
-A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 401 porque a sessão foi invalidada.
+A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 401 porque a sessão foi invalidada. Sem o header `X-XSRF-TOKEN`, o login dá 403.
 
 Na tela, o formulário **Entrar** chama `/api/login` e, depois, a saudação usa `/api/protegido/uppercase` para mostrar o nome em maiúsculas. Como o `ng serve` faz proxy de `/api`, front e API ficam na mesma origem (`localhost:4200`) e o navegador envia o `JSESSIONID` sozinho, sem CORS. Um F5 mantém o login: a tela chama `/api/me` ao abrir.
 
@@ -89,9 +91,17 @@ Na tela, o formulário **Entrar** chama `/api/login` e, depois, a saudação usa
 | GET    | `/api/protegido/hora-login` | **protegido**: `{ "name", "horaLogin" }`; sem sessão, 401 |
 | POST   | `/api/protegido/uppercase`  | **protegido**: nome em maiúsculas; sem sessão, 401         |
 
-Tudo em `/api/protegido/**` passa pelo `SessaoObrigatoriaInterceptor`, que devolve 401 se a sessão não tiver um nome. A hora do login é gravada na sessão por `/api/login`. A página mostra a mensagem pública sempre e, depois de entrar, a hora do login.
+Quem decide o acesso é o **Spring Security**, configurado em [`SecurityConfig`](backend/src/main/java/com/example/backend/SecurityConfig.java): `/api/login` e `/api/publico/**` são liberados, e todo o resto exige login (senão 401). A hora do login é gravada na sessão por `/api/login`. A página mostra a mensagem pública sempre e, depois de entrar, a hora do login.
 
-O endpoint de maiúsculas nasceu como `/api/uppercase`, antes de existir login. Para protegê-lo bastou mudar o caminho para dentro de `/api/protegido/**`: o interceptor não precisou mudar.
+O endpoint de maiúsculas nasceu como `/api/uppercase`, antes de existir login, e depois foi movido para `/api/protegido/uppercase`.
+
+> **Histórico:** antes do Spring Security, a proteção era um `HandlerInterceptor` feito à mão (`SessaoObrigatoriaInterceptor`), que conferia se havia um nome na sessão. Compare os dois com `git show` no commit *Troca o interceptor pelo Spring Security*: o comportamento é o mesmo, mas agora as regras ficam declaradas num lugar só, e o CSRF vem junto.
+
+### Proteção contra CSRF
+
+Como o navegador envia o `JSESSIONID` sozinho, um site malicioso poderia fazer o navegador de um usuário logado disparar um POST para cá. Para impedir isso, o Spring Security grava um token aleatório no cookie `XSRF-TOKEN` e exige o mesmo valor no header `X-XSRF-TOKEN` em todo POST, PUT e DELETE. Um site de outra origem não consegue ler o cookie, então não consegue montar o header.
+
+Do lado do Angular não há código nenhum: o `HttpClient` já lê o cookie `XSRF-TOKEN` e envia o header `X-XSRF-TOKEN` nas chamadas que alteram dados. Sem o header, a resposta é 403.
 
 ## Para quem vem de JSF e WildFly
 
@@ -103,7 +113,7 @@ No **Angular**, a tela inteira é um programa JavaScript que roda no navegador. 
 
 - **F5 apaga a memória da tela.** No JSF, um `@SessionScoped` continua lá depois do F5 e a página volta preenchida. Aqui a sessão também continua no servidor, mas a tela recomeça do zero e precisa *perguntar* quem está logado. É por isso que ela chama `/api/me` ao abrir.
 - **O servidor não sabe qual tela está aberta.** Ele só vê chamadas HTTP soltas. Navegação, validação de formulário e "o que mostrar" ficam no navegador.
-- **CSRF não vem de graça.** No JSF o ViewState funciona como um token contra CSRF. Aqui não há nada equivalente: este projeto de estudo não se protege contra isso. Num projeto real, o Spring Security resolve isso com um token próprio.
+- **CSRF não vem de graça.** No JSF o ViewState funciona como um token contra CSRF. Aqui quem faz esse papel é o Spring Security, com o cookie `XSRF-TOKEN` e o header `X-XSRF-TOKEN` (veja [Proteção contra CSRF](#proteção-contra-csrf)).
 
 ### O que é igual ao que você já conhece
 
@@ -116,7 +126,9 @@ No **Angular**, a tela inteira é um programa JavaScript que roda no navegador. 
 | --------------------------------------------- | --------------------------------------------------------------- |
 | `@RestController` + `@GetMapping`              | Recurso JAX-RS (`@Path` + `@GET`)                                |
 | `HttpServletRequest.getSession()`              | Igual; num managed bean, seria um `@SessionScoped`               |
-| `SessaoObrigatoriaInterceptor`                 | Um `Filter` de servlet ou um `ContainerRequestFilter` do JAX-RS  |
+| `SecurityConfig` (Spring Security)             | `<security-constraint>` no `web.xml` / Jakarta Security          |
+| `.permitAll()` / `.authenticated()`            | URL fora / dentro de uma `<security-constraint>`                 |
+| `Authentication` recebido no controller        | `request.getUserPrincipal()` / `SecurityContext` do Jakarta      |
 | `./mvnw spring-boot:run` (servidor embutido)   | Gerar o `.war` e fazer deploy no WildFly                         |
 | `application.properties`                       | `standalone.xml` + `web.xml`                                     |
 | Componente Angular (`app.ts` + `app.html`)     | Managed bean + página `.xhtml`                                   |
@@ -142,9 +154,10 @@ git show <hash>
 4. *Frontend chama o backend*: o navegador falando JSON com o servidor.
 5. *Backend: login sem senha com sessão HTTP*: a sessão, testada com `curl`.
 6. *Frontend: tela de login usando a sessão*: a tela usando o cookie.
-7. *Endpoint público e endpoint protegido*: barrar quem não tem sessão.
-
-Próximo passo natural: trocar o interceptor feito à mão pelo **Spring Security**, que também cuida de CSRF.
+7. *Endpoint público e endpoint protegido*: barrar quem não tem sessão, com um interceptor feito à mão.
+8. *README: guia para quem vem de JSF e WildFly*: este guia.
+9. *Protege o endpoint de maiúsculas*: proteger mais um endpoint só mudando o caminho.
+10. *Troca o interceptor pelo Spring Security*: o mesmo comportamento feito pelo framework, mais a proteção contra CSRF.
 
 ## Code scaffolding
 
