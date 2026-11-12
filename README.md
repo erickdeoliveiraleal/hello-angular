@@ -47,6 +47,22 @@ POST /api/uppercase
 { "name": "joão" }   ->   { "result": "JOÃO" }
 ```
 
+### Autenticação (JWT)
+
+`/api/uppercase` exige um access token JWT no header `Authorization: Bearer <token>`. O login é sem senha: basta um nome preenchido.
+
+| Endpoint | Corpo | Resposta |
+|---|---|---|
+| `POST /api/auth/login` | `{ "name": "joão" }` | `{ "accessToken", "refreshToken", "expiresIn" }` |
+| `POST /api/auth/refresh` | `{ "refreshToken": "..." }` | um par novo de tokens |
+
+- **Access token:** vale 1 minuto (curto de propósito, para ver o refresh acontecer). Só serve para chamar a API.
+- **Refresh token:** vale 1 dia e só serve para pedir um par novo. Cada refresh token pode ser usado **uma vez**; o backend guarda os já usados em memória, então essa lista zera quando ele reinicia.
+- Os tokens são assinados com HS256. A chave vem da variável de ambiente `JWT_SECRET` (Base64, 256 bits); sem ela, é usada uma chave de desenvolvimento que está no `application.properties`. **Em produção, sempre defina `JWT_SECRET`.**
+- Os tempos de validade ficam em `app.jwt.access-token-ttl` e `app.jwt.refresh-token-ttl`, no [`application.properties`](backend/src/main/resources/application.properties).
+
+No front, o campo de nome serve de login. Ao clicar em **Cumprimentar**, o app entra com aquele nome (ou troca de usuário, se o nome mudou) e chama a API. O [`auth.interceptor.ts`](src/app/auth.interceptor.ts) coloca o token em cada chamada. Se a API responder 401 porque o token expirou, ele renova com o refresh token e repete a chamada. Os tokens ficam só em memória: recarregar a página exige um novo login.
+
 Para rodar (porta 8080), em outro terminal:
 
 ```bash

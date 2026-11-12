@@ -17,4 +17,11 @@
   <p class="error">{{ error() }}</p>
 }
 
+@if (auth.user(); as user) {
+  <p class="status">
+    Autenticado como <strong>{{ user }}</strong> via JWT
+    (access token renovado {{ auth.refreshes() }} {{ auth.refreshes() === 1 ? 'vez' : 'vezes' }})
+  </p>
+}
+
 <router-outlet />

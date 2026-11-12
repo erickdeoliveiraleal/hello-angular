@@ -17,3 +17,8 @@ button {
 .error {
   color: #b00020;
 }
+
+.status {
+  color: #555;
+  font-size: 0.9em;
+}
