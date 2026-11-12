@@ -184,6 +184,7 @@ git show <hash>
 13. *Adiciona CURSO.md*: o projeto inteiro explicado como um curso.
 14. *Não cria sessão para quem não está logado*: um ajuste de configuração e um teste contra o servidor real.
 15. *Login com usuário e senha*: senha com hash BCrypt, usando os componentes padrão do Spring Security, e o campo de senha na tela.
+16. *Entrar de novo depois de sair, sem recarregar*: um bug de CSRF que os testes com `MockMvc` não pegavam.
 
 ## Code scaffolding
 

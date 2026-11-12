@@ -13,7 +13,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
-import org.springframework.security.web.authentication.logout.HttpStatusReturningLogoutSuccessHandler;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.savedrequest.NullRequestCache;
@@ -34,6 +34,9 @@ public class SecurityConfig {
 
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		// Onde fica o token CSRF: no cookie XSRF-TOKEN, legível pelo JavaScript (é o que o
+		// csrf.spa() usaria). Fica numa variável porque o logout também precisa dele.
+		CookieCsrfTokenRepository tokensCsrf = CookieCsrfTokenRepository.withHttpOnlyFalse();
 		http
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers("/api/login", "/api/publico/**", "/error").permitAll()
@@ -44,14 +47,19 @@ public class SecurityConfig {
 			// depois do login. Isso só serve para sites com redirecionamento; numa API, só
 			// criaria uma sessão à toa para cada visitante sem login.
 			.requestCache(cache -> cache.requestCache(new NullRequestCache()))
-			// O próprio Spring invalida a sessão e responde 204.
+			// O próprio Spring invalida a sessão, apaga o token CSRF e responde 204.
 			.logout(logout -> logout
 				.logoutUrl("/api/logout")
-				.logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler(HttpStatus.NO_CONTENT)))
+				.logoutSuccessHandler((request, response, autenticacao) -> {
+					// O logout apaga o token CSRF (um token por "sessão de uso"). Sem um novo,
+					// o próximo POST da tela, como entrar de novo sem recarregar, levaria 403.
+					tokensCsrf.saveToken(tokensCsrf.generateToken(request), request, response);
+					response.setStatus(HttpStatus.NO_CONTENT.value());
+				}))
 			// CSRF: o JSF se protege com o ViewState; aqui o Spring grava um token no cookie
 			// XSRF-TOKEN e exige o mesmo valor no header X-XSRF-TOKEN em todo POST/PUT/DELETE.
 			// O HttpClient do Angular lê o cookie e envia o header sozinho.
-			.csrf(csrf -> csrf.spa())
+			.csrf(csrf -> csrf.spa().csrfTokenRepository(tokensCsrf))
 			.addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class);
 		return http.build();
 	}

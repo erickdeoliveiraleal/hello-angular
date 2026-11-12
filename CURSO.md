@@ -446,10 +446,28 @@ Num site tradicional, quando alguém sem login tenta abrir `/pagina-x`, o Spring
 ```java
 .logout(logout -> logout
     .logoutUrl("/api/logout")
-    .logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler(HttpStatus.NO_CONTENT)))
+    .logoutSuccessHandler((request, response, autenticacao) -> {
+        tokensCsrf.saveToken(tokensCsrf.generateToken(request), request, response);
+        response.setStatus(HttpStatus.NO_CONTENT.value());
+    }))
 ```
 
-O `LogoutFilter` intercepta `POST /api/logout`, invalida a `HttpSession`, limpa o `SecurityContext` e responde 204 (sucesso, sem corpo). A requisição nem chega a um controller.
+O `LogoutFilter` intercepta `POST /api/logout`, invalida a `HttpSession`, limpa o `SecurityContext` e **apaga o token CSRF**. A requisição nem chega a um controller. Depois disso, ele chama o *logout success handler*, que decide a resposta. O nosso é uma lambda que faz duas coisas:
+
+1. **Gera e grava um token CSRF novo.** Apagar o token no logout é uma boa prática (cada login "começa limpo"). Mas a tela continua aberta, e o próximo POST dela, por exemplo entrar de novo sem recarregar a página, iria sem token e levaria 403. Com o token novo já no cookie da resposta do logout, o próximo POST funciona.
+2. **Responde 204** (sucesso, sem corpo).
+
+`tokensCsrf` é o `CookieCsrfTokenRepository`, o componente que lê e grava o cookie `XSRF-TOKEN`. Ele é criado numa variável no começo do método, para ser usado tanto aqui quanto na configuração do CSRF:
+
+```java
+CookieCsrfTokenRepository tokensCsrf = CookieCsrfTokenRepository.withHttpOnlyFalse();
+...
+.csrf(csrf -> csrf.spa().csrfTokenRepository(tokensCsrf))
+```
+
+`withHttpOnlyFalse()` cria o cookie **sem** `HttpOnly`, para o JavaScript (o Angular) poder lê-lo. É o mesmo que o `spa()` configuraria sozinho; a única diferença é que agora temos a referência para usar no logout.
+
+> Este bug passou despercebido por vários commits porque, nos testes manuais, a página sempre era recarregada antes de entrar de novo, e o recarregamento busca um token novo. O teste `LoginDepoisDoLogoutHttpTests` reproduz o caminho que faltava: entrar, sair e entrar de novo **sem recarregar**.
 
 **CSRF:**
 
@@ -605,7 +623,9 @@ class SessaoAnonimaHttpTests {
 - **`@LocalServerPort`**: injeta o número da porta escolhida.
 - O teste usa o `java.net.http.HttpClient` do próprio Java para fazer um `GET /api/me` sem login e confere o cabeçalho `Set-Cookie`: deve vir o `XSRF-TOKEN`, mas **não** o `JSESSIONID`.
 
-Por que não `MockMvc` aqui? Porque no `MockMvc` a requisição é simulada, e uma sessão aparece mesmo quando o servidor real não cria nenhuma. Para perguntas sobre o que realmente vai para o navegador (cookies, cabeçalhos), o teste com servidor real é o confiável. Ele é mais lento, então só vale a pena quando o `MockMvc` não responde à pergunta.
+**`LoginDepoisDoLogoutHttpTests`** também usa o servidor real, mas imita um navegador: o `HttpClient` ganha um `CookieManager`, que guarda os cookies recebidos e os reenvia sozinho. Como o Angular, o teste lê o cookie `XSRF-TOKEN` e manda o valor no header `X-XSRF-TOKEN` em cada POST. Ele entra, sai e entra de novo, sem "recarregar".
+
+Por que não `MockMvc` aqui? Porque no `MockMvc` a requisição é simulada, e uma sessão aparece mesmo quando o servidor real não cria nenhuma. Além disso, nos testes com `MockMvc` o `.with(csrf())` fabrica um token válido a cada requisição, então um problema com o cookie `XSRF-TOKEN` nunca apareceria. Para perguntas sobre o que realmente vai para o navegador (cookies, cabeçalhos), o teste com servidor real é o confiável. Ele é mais lento, então só vale a pena quando o `MockMvc` não responde à pergunta.
 
 **E teste de unidade?** É o tipo mais rápido e simples: cria o objeto com `new` e chama o método, sem subir o Spring. Este projeto já teve um, quando a regra de login era uma classe própria (veja o commit *Troca o if do login por um AuthenticationProvider*). Hoje a regra é feita só com classes prontas do Spring, então não há código nosso para testar isoladamente: o que importa testar é se as peças foram ligadas certo, e isso os testes de integração fazem.
 
@@ -894,8 +914,8 @@ Sem o cookie (ou com a sessão expirada), o `AuthorizationFilter` recusa, o `Exc
 ### Logout
 
 1. **Sair** chama `POST /api/logout`, com o header `X-XSRF-TOKEN`.
-2. O `CsrfFilter` confere o token. O `LogoutFilter` invalida a sessão e responde 204.
-3. A tela limpa o próprio estado. Uma chamada protegida depois disso dá 401.
+2. O `CsrfFilter` confere o token. O `LogoutFilter` invalida a sessão, apaga o token CSRF antigo, grava um novo no cookie `XSRF-TOKEN` e responde 204.
+3. A tela limpa o próprio estado. Uma chamada protegida depois disso dá 401, mas um novo login funciona na hora, sem recarregar a página, porque o token novo já está no cookie.
 
 ### Ataque CSRF bloqueado
 
