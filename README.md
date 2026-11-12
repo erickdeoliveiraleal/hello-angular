@@ -2,12 +2,37 @@
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.2.5.
 
-## Development server
+## Pré-requisitos
 
-To start a local development server, run (or use `npm start`):
+- Node.js `^22.22.3 || ^24.15.0 || >=26.0.0`
+- Angular CLI 22.2.5 instalado globalmente:
 
 ```bash
-npx ng serve
+npm install -g @angular/cli@22.2.5
+```
+
+Confira a instalação (rode dentro da pasta do projeto para ver também a versão do `@angular/core`):
+
+```bash
+ng version
+```
+
+Depois de clonar, instale as dependências do projeto:
+
+```bash
+npm install
+```
+
+> Sem o CLI global, use `npx ng <comando>` (por exemplo `npx ng serve`) ou `npm start`. Os dois usam o CLI local do projeto.
+>
+> No PowerShell, se `ng` der erro de política de execução de scripts, use `ng.cmd` ou `npx ng`.
+
+## Development server
+
+To start a local development server, run:
+
+```bash
+ng serve
 ```
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
@@ -17,13 +42,13 @@ Once the server is running, open your browser and navigate to `http://localhost:
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
 
 ```bash
-npx ng generate component component-name
+ng generate component component-name
 ```
 
 For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
 
 ```bash
-npx ng generate --help
+ng generate --help
 ```
 
 ## Building
@@ -31,7 +56,7 @@ npx ng generate --help
 To build the project run:
 
 ```bash
-npx ng build
+ng build
 ```
 
 This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
@@ -41,7 +66,7 @@ This will compile your project and store the build artifacts in the `dist/` dire
 To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
 
 ```bash
-npx ng test
+ng test
 ```
 
 ## Running end-to-end tests
@@ -49,7 +74,7 @@ npx ng test
 For end-to-end (e2e) testing, run:
 
 ```bash
-npx ng e2e
+ng e2e
 ```
 
 Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
