@@ -31,3 +31,26 @@ button {
 .protegido {
   border-color: #1565c0;
 }
+
+fieldset {
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.acoes {
+  display: flex;
+  gap: 8px;
+}
+
+.resultado {
+  padding: 6px 8px;
+  border-left: 4px solid #6a1b9a;
+}
+
+.estudo {
+  font-size: 0.9em;
+  color: #555;
+}

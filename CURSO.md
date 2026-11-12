@@ -19,6 +19,7 @@
   - [2.8 Spring Security](#28-spring-security)
   - [2.9 UsuariosConfig](#29-usuariosconfig-quem-pode-entrar)
   - [2.10 Testes](#210-testes)
+  - [2.11 Posto de trabalho e permissões](#211-posto-de-trabalho-e-permissões)
 - [Módulo 3: O frontend (Angular)](#módulo-3-o-frontend-angular)
   - [3.1 Ferramentas](#31-ferramentas-node-npm-e-angular-cli)
   - [3.2 Como a página nasce](#32-como-a-página-nasce)
@@ -27,6 +28,7 @@
   - [3.5 Falando com o backend](#35-falando-com-o-backend-httpclient)
   - [3.6 O proxy](#36-o-proxy-proxyconfjson)
   - [3.7 Produção: um .jar só](#37-produção-um-jar-só)
+  - [3.8 Botões conforme a permissão](#38-botões-conforme-a-permissão)
 - [Módulo 4: Os fluxos completos, passo a passo](#módulo-4-os-fluxos-completos-passo-a-passo)
 - [Módulo 5: Códigos HTTP usados](#módulo-5-códigos-http-usados)
 - [Módulo 6: Exercícios](#módulo-6-exercícios)
@@ -132,6 +134,8 @@ Arquivos em `backend/src/main/java/com/example/backend/`:
 | `SessaoController.java` | `POST /api/login` e `GET /api/me` |
 | `SecurityConfig.java` | Regras de acesso, logout, CSRF e como conferir usuário e senha |
 | `UsuariosConfig.java` | Os usuários que podem entrar e o hash das senhas |
+| `PostosDeTrabalho.java` | Os postos de trabalho e as permissões de cada um |
+| `OperacoesController.java` | `POST /api/visitas` e `POST /api/escala`, cada um exigindo uma permissão |
 
 E `backend/src/main/resources/application.properties`, que é a configuração (equivale a uma mistura de `standalone.xml` e `web.xml`).
 
@@ -227,7 +231,8 @@ Um controller REST é o equivalente a um recurso JAX-RS. As anotações usadas:
 
 ```java
 public record LoginRequest(String name, String password) { }
-public record UsuarioResponse(String name) { }
+public record UsuarioResponse(String name, String postoTrabalho,
+        List<String> postosDisponiveis, List<String> permissoes) { }
 ```
 
 Um `record` (Java 16+) é uma classe imutável com construtor, getters, `equals` e `toString` gerados. O **Jackson** converte o JSON `{ "name": "erick", "password": "..." }` em `new LoginRequest("erick", "...")` e o retorno `new UsuarioResponse("erick")` em `{ "name": "erick" }`. Campo ausente no JSON vira `null`. Os nomes dos campos do JSON são os nomes dos componentes do record.
@@ -350,13 +355,15 @@ Quando a sessão é criada, o Tomcat devolve na resposta o cabeçalho `Set-Cooki
 - **`SecurityContextHolder`**: onde o Spring Security guarda a ficha **durante a requisição atual**. É um `ThreadLocal`: cada requisição (cada thread do Tomcat) tem a sua.
 - **`HttpSessionSecurityContextRepository`**: grava a ficha **na `HttpSession`**, no atributo `SPRING_SECURITY_CONTEXT`. Nas próximas requisições, um filtro do Spring Security (`SecurityContextHolderFilter`) lê a ficha da sessão e a coloca de volta no `SecurityContextHolder`. É isso que faz o login "durar" entre requisições.
 
-**5. Responder com o nome:**
+No código atual, esse passo 4 fica num método auxiliar, `entrarNoPosto(...)`. O `Authentication` gravado não é exatamente o que o `AuthenticationManager` devolveu: é o mesmo usuário, mas com as **permissões do posto de trabalho** inicial dele. Isso é explicado em [2.11](#211-posto-de-trabalho-e-permissões).
+
+**5. Responder com quem entrou:**
 
 ```java
-    return ResponseEntity.ok(new UsuarioResponse(usuario.getName()));
+    return ResponseEntity.ok(resposta(noPosto, sessao));
 ```
 
-O nome devolvido é o **cadastrado** (`erick`), não o digitado: quem entrou como `Erick` recebe `erick`.
+A resposta traz o nome, o posto, os postos possíveis e as permissões, tudo o que a tela precisa. O nome devolvido é o **cadastrado** (`erick`), não o digitado: quem entrou como `Erick` recebe `erick`.
 
 **Quem está logado?**
 
@@ -634,6 +641,91 @@ Por que não `MockMvc` aqui? Porque no `MockMvc` a requisição é simulada, e u
 
 **E teste de unidade?** É o tipo mais rápido e simples: cria o objeto com `new` e chama o método, sem subir o Spring. Este projeto já teve um, quando a regra de login era uma classe própria (veja o commit *Troca o if do login por um AuthenticationProvider*). Hoje a regra é feita só com classes prontas do Spring, então não há código nosso para testar isoladamente: o que importa testar é se as peças foram ligadas certo, e isso os testes de integração fazem.
 
+**`PostosEPermissoesTests`** faz um login de verdade (não usa `user(...)`) e confere o caminho completo das permissões: posto inicial, 403 na escala pela `PORTARIA`, troca para `CHEFIA` liberando a escala na hora, e volta tirando a permissão (veja 2.11).
+
+### 2.11 Posto de trabalho e permissões
+
+No JSF era comum mostrar um botão conforme o posto de trabalho ou uma permissão: `rendered="#{sessao.podeEditarEscala}"`. Aqui a mesma ideia é dividida em duas partes, porque a tela roda no navegador:
+
+1. **O backend garante a permissão**, que é a segurança de verdade.
+2. **A tela só reflete**, mostrando ou escondendo o botão (veja [3.8](#38-botões-conforme-a-permissão)).
+
+**Por que a divisão?** No JSF, um botão com `rendered="false"` também não pode ser acionado, porque o servidor não processa a ação de um componente que ele não desenhou. No Angular, esconder um botão com `@if` é **só aparência**: qualquer pessoa pode abrir o F12 e fazer `fetch('/api/escala', {method: 'POST', ...})`. Se o backend não conferir, a ação acontece.
+
+#### `PostosDeTrabalho`: o que cada posto pode fazer
+
+```java
+private static final Map<String, Set<String>> PERMISSOES_DO_POSTO = Map.of(
+        "PORTARIA", Set.of(VISITA_REGISTRAR),
+        "CHEFIA", Set.of(VISITA_REGISTRAR, ESCALA_EDITAR));
+
+private static final Map<String, List<String>> POSTOS_DO_USUARIO = Map.of(
+        "erick", List.of("PORTARIA", "CHEFIA"));
+```
+
+Fixo no código, só para estudo. Num sistema real, viria do banco (lotação do servidor, perfis de cada posto).
+
+O método mais importante transforma "usuário + posto" num `Authentication` cujas **authorities** são as permissões do posto:
+
+```java
+public Authentication autenticadoNoPosto(String usuario, String posto) {
+    List<SimpleGrantedAuthority> permissoes = PERMISSOES_DO_POSTO.getOrDefault(posto, Set.of()).stream()
+        .sorted()
+        .map(SimpleGrantedAuthority::new)
+        .toList();
+    return UsernamePasswordAuthenticationToken.authenticated(usuario, null, permissoes);
+}
+```
+
+**Authority** é o nome que o Spring Security dá a "uma coisa que o usuário pode fazer": uma string como `ESCALA_EDITAR`. São elas que o `@PreAuthorize` confere. (Uma *role* é só uma authority com o prefixo `ROLE_`: `hasRole('ADMIN')` confere `ROLE_ADMIN`.)
+
+#### O posto fica na sessão
+
+No login, o `SessaoController` coloca o usuário no **primeiro** posto dele, e guarda na sessão:
+
+- o posto, num atributo nosso (`postoTrabalho`), como um campo de um bean `@SessionScoped`;
+- o `Authentication` com as permissões do posto, no `SecurityContext` (o mesmo mecanismo do login, veja 2.7).
+
+O `/api/me` passa a devolver tudo o que a tela precisa para decidir o que mostrar:
+
+```json
+{ "name": "erick", "postoTrabalho": "PORTARIA",
+  "postosDisponiveis": ["PORTARIA", "CHEFIA"], "permissoes": ["VISITA_REGISTRAR"] }
+```
+
+#### Trocar de posto: `POST /api/posto`
+
+```java
+@PostMapping("/posto")
+public ResponseEntity<UsuarioResponse> trocarPosto(@RequestBody TrocaDePostoRequest request,
+        Authentication usuario, HttpServletRequest http, HttpServletResponse response) {
+    if (!postos.podeTrabalharEm(usuario.getName(), request.posto())) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    }
+    http.changeSessionId();
+    Authentication noPosto = entrarNoPosto(usuario.getName(), request.posto(), http, response);
+    return ResponseEntity.ok(resposta(noPosto, http.getSession(false)));
+}
+```
+
+- **Confere se o usuário pode trabalhar no posto pedido.** Sem isso, bastaria mandar `{"posto": "CHEFIA"}` pelo F12 para ganhar as permissões da chefia.
+- **`changeSessionId()`** troca o `JSESSIONID`, mantendo o conteúdo da sessão. É a mesma precaução do login (*session fixation*): sempre que as permissões mudam, o identificador muda.
+- **Grava o novo `Authentication` na sessão.** Na **próxima requisição**, o usuário já tem as permissões do novo posto, e perde as do antigo. É aqui que a sessão se mostra mais cômoda que o JWT: num token, as permissões ficariam "congeladas" até ele expirar, e trocar de posto exigiria emitir um token novo.
+
+#### `@PreAuthorize`: a regra em cada ação
+
+```java
+@PostMapping("/escala")
+@PreAuthorize("hasAuthority('ESCALA_EDITAR')")
+public ResultadoResponse editarEscala(Authentication usuario, HttpSession sessao) { ... }
+```
+
+- **`@PreAuthorize`** é conferido **antes** de o método rodar. Sem a permissão, o Spring lança uma `AccessDeniedException`, a resposta é **403** e o método nem executa. É o `@RolesAllowed` do Jakarta EE, mas aceitando expressões (`hasAuthority`, `hasRole`, `hasAnyAuthority`, combinações com `and`/`or`...).
+- Ele só funciona porque o `SecurityConfig` tem **`@EnableMethodSecurity`**. Sem essa anotação, o `@PreAuthorize` seria ignorado em silêncio, e é por isso que os testes conferem o 403.
+- **401 × 403:** sem login, a resposta continua 401 (o `AuthorizationFilter` barra antes, por `/api/**`). Logado mas sem a permissão, 403.
+
+A outra forma de proteger é por URL, no `SecurityConfig`: `.requestMatchers("/api/escala/**").hasAuthority("ESCALA_EDITAR")`. As duas funcionam. Por URL é como o `<security-constraint>` do `web.xml`; por método fica junto do código que ela protege.
+
 ---
 
 ## Módulo 3: O frontend (Angular)
@@ -749,7 +841,9 @@ export class App implements OnInit {
 |---|---|---|
 | `ngOnInit()` | Ao abrir a página (e após F5) | `GET /api/publico/mensagem` e `GET /api/me`. Se `/api/me` responder 200, chama `entrou(...)` |
 | `login()` | Ao enviar o formulário | Exige nome e senha, faz `POST /api/login` e limpa a senha da tela. Em 401, mostra "Nome ou senha inválidos." |
-| `entrou(nome)` | Depois de um login ou de um `/api/me` com sucesso | Marca como logado e busca, nos endpoints protegidos, o nome em maiúsculas e a hora do login |
+| `entrou(u)` | Depois de um login ou de um `/api/me` com sucesso | Marca como logado, guarda posto e permissões, e busca nos endpoints protegidos o nome em maiúsculas e a hora do login |
+| `trocarPosto(p)` | Ao escolher outro posto | `POST /api/posto` e aplica as permissões da resposta (veja 3.8) |
+| `executar(url)` | Ao clicar em Registrar visita ou Editar escala | Chama a ação e mostra a resposta, ou "O servidor recusou (403)" |
 | `logout()` | Ao clicar em **Sair** | `POST /api/logout` e limpa o estado da tela |
 
 `interface Usuario { name: string; }` descreve o formato do JSON esperado. Ela existe só para o compilador TypeScript ajudar; não vira código no navegador.
@@ -946,6 +1040,45 @@ server {
 
 **E o WildFly?** Dá para gerar um `.war` do Spring Boot e fazer deploy num servidor de aplicação. Mas este projeto usa Spring Boot 4, que exige Jakarta EE 11 (`jakarta.*`), e um WildFly antigo (Java EE 8, `javax.*`) não roda o projeto. O caminho normal do Spring Boot é o `.jar` com servidor embutido.
 
+### 3.8 Botões conforme a permissão
+
+A parte da tela do que foi visto em [2.11](#211-posto-de-trabalho-e-permissões). As permissões chegam pelo `/api/me` (e pelo login e pela troca de posto), e ficam em *signals*:
+
+```ts
+protected readonly posto = signal<string | null>(null);
+protected readonly postos = signal<string[]>([]);
+protected readonly permissoes = signal<string[]>([]);
+
+protected pode(permissao: string): boolean {
+  return this.permissoes().includes(permissao);
+}
+```
+
+`pode(...)` é o equivalente ao `#{sessao.pode('ESCALA_EDITAR')}` que você chamaria num `rendered`. Como lê um signal, quando as permissões mudam (troca de posto) o Angular redesenha os botões sozinho.
+
+```html
+@if (pode('ESCALA_EDITAR') || mostrarTudo()) {
+  <button type="button" (click)="executar('/api/escala')">Editar escala</button>
+}
+```
+
+**O seletor de posto** usa o `@for`, o "laço" do template (como `ui:repeat` ou `c:forEach`):
+
+```html
+<select id="posto" (change)="trocarPosto($any($event.target).value)">
+  @for (p of postos(); track p) {
+    <option [value]="p" [selected]="p === posto()">{{ p }}</option>
+  }
+</select>
+```
+
+- `@for (p of postos(); track p)` repete o `<option>` para cada posto. O `track p` diz ao Angular como reconhecer cada item; é obrigatório e evita redesenhar a lista inteira quando ela muda.
+- `(change)` dispara ao escolher outro posto. `trocarPosto` chama `POST /api/posto` e aplica as permissões que vierem na resposta.
+
+**A caixa "mostrar também os botões sem permissão"** existe só para estudo. Ela faz o `@if` mostrar os botões mesmo sem a permissão. Ligue a caixa na `PORTARIA` e clique em **Editar escala**: o backend responde 403, e a tela mostra "O servidor recusou (403)". É a prova de que esconder o botão não é o que protege.
+
+**Para muitos botões**, repetir `@if (pode('X'))` fica verboso. O passo seguinte comum é criar uma **diretiva** própria, por exemplo `<button *temPermissao="'ESCALA_EDITAR'">`, ou um serviço `PermissoesService` compartilhado entre telas (veja os exercícios).
+
 ---
 
 ## Módulo 4: Os fluxos completos, passo a passo
@@ -991,7 +1124,7 @@ sequenceDiagram
     M-->>C: usuário autenticado
     Note over C: nova HttpSession + hora do login<br/>SecurityContext gravado na sessão
     C-->>N: 200 + nome + Set-Cookie JSESSIONID
-    Note over N: entrou(nome) chama os endpoints protegidos
+    Note over N: entrou(u) guarda posto e permissões<br/>e chama os endpoints protegidos
 ```
 
 Se o usuário não existir ou a senha não conferir, o provider lança `BadCredentialsException`, o controller responde 401, **nenhuma sessão é criada**, e a tela mostra uma mensagem de erro.
@@ -1017,6 +1150,24 @@ Sem o cookie (ou com a sessão expirada), o `AuthorizationFilter` recusa, o `Exc
 2. `ngOnInit` chama `GET /api/me`. O navegador envia o `JSESSIONID`, que continua válido.
 3. O servidor responde 200 com o nome, e a tela chama `entrou(...)` e volta ao estado de logado.
 
+### Trocar de posto e usar uma permissão
+
+```mermaid
+sequenceDiagram
+    participant N as Navegador (Angular)
+    participant S as SessaoController
+    participant O as OperacoesController
+    Note over N: posto PORTARIA, botão Editar escala escondido
+    N->>O: POST /api/escala (chamada direta, pelo F12)
+    O-->>N: 403, @PreAuthorize recusou
+    N->>S: POST /api/posto com posto CHEFIA
+    Note over S: confere se erick pode trabalhar na CHEFIA<br/>troca o JSESSIONID<br/>grava as permissões da CHEFIA na sessão
+    S-->>N: 200 + permissões ESCALA_EDITAR e VISITA_REGISTRAR
+    Note over N: permissoes() mudou e o botão Editar escala aparece
+    N->>O: POST /api/escala
+    O-->>N: 200, Escala editada por erick no posto CHEFIA
+```
+
 ### Logout
 
 1. **Sair** chama `POST /api/logout`, com o header `X-XSRF-TOKEN`.
@@ -1040,7 +1191,7 @@ Sem o cookie (ou com a sessão expirada), o `AuthorizationFilter` recusa, o `Exc
 | 204 | No Content | Logout feito (sucesso, sem corpo) |
 | 400 | Bad Request | Login com nome vazio |
 | 401 | Unauthorized | Sem login (ou sessão expirada), ou usuário/senha errados |
-| 403 | Forbidden | POST sem o token CSRF (ou com token errado) |
+| 403 | Forbidden | POST sem o token CSRF (ou com token errado); ação sem a permissão do posto (`@PreAuthorize`); troca para um posto que o usuário não tem |
 
 Apesar do nome, **401 significa "não autenticado"** (não sei quem você é), e **403 significa "proibido"** (sei, ou não importa, mas não pode).
 
@@ -1057,7 +1208,9 @@ Em ordem de dificuldade. Cada um mexe numa parte diferente do projeto.
 5. **Ver os cookies.** Abra as ferramentas do navegador (F12) → *Application* → *Cookies*. Observe o `JSESSIONID` (`HttpOnly`) e o `XSRF-TOKEN` (não `HttpOnly`), antes e depois do login e do logout.
 6. **Quebrar o CSRF de propósito.** No console do navegador (F12), rode `fetch('/api/logout', {method: 'POST'})` e veja o 403. Depois rode com o header certo, lendo o valor do cookie.
 7. **Usuários no banco.** Troque o `InMemoryUserDetailsManager` por um `UserDetailsService` próprio que busca o usuário numa tabela (com Spring Data JPA, ou com o `JdbcUserDetailsManager` do Spring). *Repare:* nem o `SecurityConfig` nem o `SessaoController` precisam mudar.
-8. **Perfis (roles).** Dê ao `erick` a authority `ROLE_ADMIN` e crie `/api/admin/**`, acessível só com esse perfil, usando `.requestMatchers("/api/admin/**").hasRole("ADMIN")`. É o `<auth-constraint><role-name>` do `web.xml`.
+8. **Um terceiro posto.** Crie o posto `DIRETORIA`, com uma permissão nova `RELATORIO_VER`, um endpoint `GET /api/relatorio` protegido por `@PreAuthorize` e um botão que só aparece com essa permissão. *Repare:* o seletor de posto da tela não muda, porque ele mostra o que vier do `/api/me`.
+9. **Proteção por URL.** Troque o `@PreAuthorize` da escala por uma regra no `SecurityConfig`: `.requestMatchers("/api/escala/**").hasAuthority("ESCALA_EDITAR")`. Onde a regra precisa ficar em relação a `.requestMatchers("/api/**").authenticated()`? (Lembre que vale a primeira que combinar.)
+10. **Uma diretiva de permissão.** No Angular, crie uma diretiva estrutural `*temPermissao` para escrever `<button *temPermissao="'ESCALA_EDITAR'">` no lugar do `@if (pode(...))`. Guarde as permissões num serviço (`@Injectable`) para outras telas usarem.
 
 ---
 
@@ -1087,6 +1240,11 @@ Em ordem de dificuldade. Cada um mexe numa parte diferente do projeto.
 | `value="#{bean.nome}"` em `h:inputText` | `[value]="name()"` + `(input)="name.set(...)"` |
 | `action="#{bean.login}"` | `(submit)="login()"` ou `(click)="login()"` |
 | `rendered="#{...}"` | `@if (...) { }` |
+| `rendered="#{sessao.pode('X')}"` (aparência **e** segurança) | `@if (pode('X'))` na tela (só aparência) **+** `@PreAuthorize("hasAuthority('X')")` no backend (segurança) |
+| `@RolesAllowed("X")` | `@PreAuthorize("hasRole('X')")` ou `hasAuthority('X')` |
+| `request.isUserInRole("X")` | `authentication.getAuthorities()` contém `X` |
+| Posto de trabalho num bean `@SessionScoped` | Atributo na `HttpSession` + authorities do posto no `SecurityContext` |
+| `ui:repeat` / `c:forEach` | `@for (item of lista(); track item) { }` |
 | `f:convertDateTime` | Pipe `date` |
 | Navegação entre `.xhtml` | Rotas (`app.routes.ts`) |
 | AJAX do JSF (`f:ajax`) | Todo pedido ao servidor, via `HttpClient` |

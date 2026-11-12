@@ -117,6 +117,28 @@ O endpoint de maiúsculas nasceu como `/api/uppercase`, antes de existir login, 
 
 > **Histórico:** antes do Spring Security, a proteção era um `HandlerInterceptor` feito à mão (`SessaoObrigatoriaInterceptor`), que conferia se havia um nome na sessão. Compare os dois com `git show` no commit *Troca o interceptor pelo Spring Security*: o comportamento é o mesmo, mas agora as regras ficam declaradas num lugar só, e o CSRF vem junto.
 
+### Posto de trabalho e permissões
+
+Além de estar logado, cada ação exige uma **permissão**, e as permissões dependem do **posto de trabalho** em que o usuário está, como no JSF com `rendered="#{...}"` por posto ou perfil. Fixo no código, só para estudo ([`PostosDeTrabalho`](backend/src/main/java/com/example/backend/PostosDeTrabalho.java)):
+
+| Posto      | Permissões                         |
+| ---------- | ---------------------------------- |
+| `PORTARIA` | `VISITA_REGISTRAR`                 |
+| `CHEFIA`   | `VISITA_REGISTRAR`, `ESCALA_EDITAR` |
+
+O `erick` pode trabalhar nos dois e começa na `PORTARIA`.
+
+| Método | Caminho        | O que faz                                                                     |
+| ------ | -------------- | ----------------------------------------------------------------------------- |
+| GET    | `/api/me`      | `{ name, postoTrabalho, postosDisponiveis, permissoes }`                       |
+| POST   | `/api/posto`   | `{ "posto": "CHEFIA" }` troca o posto; posto que o usuário não tem dá 403       |
+| POST   | `/api/visitas` | exige `VISITA_REGISTRAR` (senão 403)                                            |
+| POST   | `/api/escala`  | exige `ESCALA_EDITAR` (senão 403)                                               |
+
+- **A segurança de verdade fica no backend:** `@PreAuthorize("hasAuthority('ESCALA_EDITAR')")` em [`OperacoesController`](backend/src/main/java/com/example/backend/OperacoesController.java), o equivalente ao `@RolesAllowed`. Esconder o botão na tela é **só aparência**, porque qualquer um pode chamar a URL direto. Na tela há uma caixa "mostrar também os botões sem permissão" para ver o backend recusar com 403.
+- **A tela só reflete:** o `/api/me` devolve as permissões, e `@if (pode('ESCALA_EDITAR')) { <button> }` mostra ou esconde o botão.
+- **Trocar de posto vale na hora**, porque as permissões ficam na sessão do servidor. Com JWT, elas ficariam presas no token até ele expirar.
+
 ### Proteção contra CSRF
 
 Como o navegador envia o `JSESSIONID` sozinho, um site malicioso poderia fazer o navegador de um usuário logado disparar um POST para cá. Para impedir isso, o Spring Security grava um token aleatório no cookie `XSRF-TOKEN` e exige o mesmo valor no header `X-XSRF-TOKEN` em todo POST, PUT e DELETE. Um site de outra origem não consegue ler o cookie, então não consegue montar o header.
@@ -202,6 +224,7 @@ git show <hash>
 15. *Login com usuário e senha*: senha com hash BCrypt, usando os componentes padrão do Spring Security, e o campo de senha na tela.
 16. *Entrar de novo depois de sair, sem recarregar*: um bug de CSRF que os testes com `MockMvc` não pegavam.
 17. *Produção: um .jar só, com perfil prod*: o Maven compila o Angular para dentro do `.jar`, com cookies `Secure` atrás de um servidor web com HTTPS.
+18. *Posto de trabalho e permissões*: botões que aparecem conforme a permissão, e o backend recusando com 403 quem não a tem.
 
 ## Code scaffolding
 

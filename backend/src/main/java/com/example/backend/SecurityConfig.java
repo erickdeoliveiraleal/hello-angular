@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -30,6 +31,8 @@ import jakarta.servlet.http.HttpServletResponse;
  * cadeia de filtros de servlet que roda antes dos controllers.
  */
 @Configuration
+// Liga o @PreAuthorize nos métodos dos controllers (veja OperacoesController).
+@EnableMethodSecurity
 public class SecurityConfig {
 
 	@Bean

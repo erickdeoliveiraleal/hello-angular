@@ -8,6 +8,41 @@
   @if (horaLogin(); as hora) {
     <p class="protegido">Endpoint protegido: login feito em {{ hora | date: 'dd/MM/yyyy HH:mm:ss' }}</p>
   }
+
+  <fieldset>
+    <legend>Posto de trabalho e permissões</legend>
+
+    <label for="posto">Posto</label>
+    <select id="posto" (change)="trocarPosto($any($event.target).value)">
+      @for (p of postos(); track p) {
+        <option [value]="p" [selected]="p === posto()">{{ p }}</option>
+      }
+    </select>
+    <p>Permissões deste posto: {{ permissoes().join(', ') || 'nenhuma' }}</p>
+
+    <!-- Cada botão só aparece com a permissão certa, como o rendered="#{...}" do JSF. -->
+    <div class="acoes">
+      @if (pode('VISITA_REGISTRAR') || mostrarTudo()) {
+        <button type="button" (click)="executar('/api/visitas')">Registrar visita</button>
+      }
+      @if (pode('ESCALA_EDITAR') || mostrarTudo()) {
+        <button type="button" (click)="executar('/api/escala')">Editar escala</button>
+      }
+    </div>
+    @if (resultado()) {
+      <p class="resultado">{{ resultado() }}</p>
+    }
+
+    <label class="estudo">
+      <input
+        type="checkbox"
+        [checked]="mostrarTudo()"
+        (change)="mostrarTudo.set($any($event.target).checked)"
+      />
+      Mostrar também os botões sem permissão (para ver o backend recusar com 403)
+    </label>
+  </fieldset>
+
   <button type="button" (click)="logout()">Sair</button>
 } @else {
   <form (submit)="$event.preventDefault(); login()">
