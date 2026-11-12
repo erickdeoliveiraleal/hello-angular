@@ -7,7 +7,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.logout.HttpStatusReturningLogoutSuccessHandler;
@@ -54,11 +57,16 @@ public class SecurityConfig {
 	}
 
 	/**
-	 * Quem o SessaoController chama para autenticar. Ele repassa a tentativa ao provider,
-	 * que decide; para trocar a regra (por exemplo, exigir senha), só se troca o provider.
+	 * Quem o SessaoController chama para autenticar. Ele repassa a tentativa ao provider.
+	 *
+	 * O DaoAuthenticationProvider é o provider padrão do Spring para usuário e senha:
+	 * busca o usuário no UserDetailsService e confere a senha com o PasswordEncoder
+	 * (os dois estão em {@link UsuariosConfig}).
 	 */
 	@Bean
-	AuthenticationManager authenticationManager(SomenteErickAuthenticationProvider provider) {
+	AuthenticationManager authenticationManager(UserDetailsService usuarios, PasswordEncoder passwordEncoder) {
+		DaoAuthenticationProvider provider = new DaoAuthenticationProvider(usuarios);
+		provider.setPasswordEncoder(passwordEncoder);
 		return new ProviderManager(provider);
 	}
 

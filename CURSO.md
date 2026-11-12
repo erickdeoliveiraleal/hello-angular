@@ -17,7 +17,7 @@
   - [2.6 MensagemController](#26-mensagemcontroller)
   - [2.7 SessaoController](#27-sessaocontroller-o-login)
   - [2.8 Spring Security](#28-spring-security)
-  - [2.9 SomenteErickAuthenticationProvider](#29-somenteerickauthenticationprovider-quem-pode-entrar)
+  - [2.9 UsuariosConfig](#29-usuariosconfig-quem-pode-entrar)
   - [2.10 Testes](#210-testes)
 - [Módulo 3: O frontend (Angular)](#módulo-3-o-frontend-angular)
   - [3.1 Ferramentas](#31-ferramentas-node-npm-e-angular-cli)
@@ -49,7 +49,7 @@ npm install
 ng serve
 ```
 
-No Windows, o primeiro é `.\mvnw.cmd spring-boot:run`. Abra `http://localhost:4200/` e entre com o nome `erick`.
+No Windows, o primeiro é `.\mvnw.cmd spring-boot:run`. Abra `http://localhost:4200/` e entre com o usuário `erick` e a senha de estudo que está no [README](README.md#login-por-sessão-jsessionid).
 
 Para rodar os testes do backend:
 
@@ -129,8 +129,8 @@ Arquivos em `backend/src/main/java/com/example/backend/`:
 | `UppercaseController.java` | `POST /api/protegido/uppercase`: nome em maiúsculas |
 | `MensagemController.java` | `GET /api/publico/mensagem` e `GET /api/protegido/hora-login` |
 | `SessaoController.java` | `POST /api/login` e `GET /api/me` |
-| `SecurityConfig.java` | Regras de acesso, logout e CSRF |
-| `SomenteErickAuthenticationProvider.java` | Decide quem pode entrar |
+| `SecurityConfig.java` | Regras de acesso, logout, CSRF e como conferir usuário e senha |
+| `UsuariosConfig.java` | Os usuários que podem entrar e o hash das senhas |
 
 E `backend/src/main/resources/application.properties`, que é a configuração (equivale a uma mistura de `standalone.xml` e `web.xml`).
 
@@ -184,17 +184,19 @@ public class BackendApplication {
 
 **Bean** é qualquer objeto que o Spring cria e gerencia, como um bean CDI. Neste projeto os beans nascem de dois jeitos:
 
-1. **Classe anotada, achada pelo `@ComponentScan`**: `@RestController` (os controllers), `@Component` (o provider) e `@Configuration` (o `SecurityConfig`). Por padrão cada bean é **singleton**: uma instância para a aplicação inteira, como `@ApplicationScoped`.
+1. **Classe anotada, achada pelo `@ComponentScan`**: `@RestController` (os controllers) e `@Configuration` (`SecurityConfig` e `UsuariosConfig`). Uma classe comum que se quer como bean leva `@Component`. Por padrão cada bean é **singleton**: uma instância para a aplicação inteira, como `@ApplicationScoped`.
 2. **Método `@Bean` dentro de uma classe `@Configuration`**: o retorno do método vira um bean. É parecido com um método `@Produces` do CDI.
 
 ```java
 @Bean
-AuthenticationManager authenticationManager(SomenteErickAuthenticationProvider provider) {
+AuthenticationManager authenticationManager(UserDetailsService usuarios, PasswordEncoder passwordEncoder) {
+    DaoAuthenticationProvider provider = new DaoAuthenticationProvider(usuarios);
+    provider.setPasswordEncoder(passwordEncoder);
     return new ProviderManager(provider);
 }
 ```
 
-Os **parâmetros** de um método `@Bean` são injetados pelo Spring. Aqui ele procura o bean do tipo `SomenteErickAuthenticationProvider` e o passa.
+Os **parâmetros** de um método `@Bean` são injetados pelo Spring. Aqui ele procura os beans do tipo `UserDetailsService` e `PasswordEncoder` (os dois declarados em `UsuariosConfig`, outra classe) e os passa. Não importa em que classe cada bean foi declarado: o Spring liga tudo pelo tipo.
 
 **Injeção pelo construtor**, como no `SessaoController`:
 
@@ -223,11 +225,11 @@ Um controller REST é o equivalente a um recurso JAX-RS. As anotações usadas:
 **Entrada e saída em JSON com `record`s**:
 
 ```java
-public record LoginRequest(String name) { }
+public record LoginRequest(String name, String password) { }
 public record UsuarioResponse(String name) { }
 ```
 
-Um `record` (Java 16+) é uma classe imutável com construtor, getters, `equals` e `toString` gerados. O **Jackson** converte o JSON `{ "name": "erick" }` em `new LoginRequest("erick")` e o retorno `new UsuarioResponse("erick")` em `{ "name": "erick" }`. Os nomes dos campos do JSON são os nomes dos componentes do record.
+Um `record` (Java 16+) é uma classe imutável com construtor, getters, `equals` e `toString` gerados. O **Jackson** converte o JSON `{ "name": "erick", "password": "..." }` em `new LoginRequest("erick", "...")` e o retorno `new UsuarioResponse("erick")` em `{ "name": "erick" }`. Campo ausente no JSON vira `null`. Os nomes dos campos do JSON são os nomes dos componentes do record.
 
 **Parâmetros que o Spring injeta sozinho**: além do `@RequestBody`, um método de controller pode pedir objetos da requisição, e o Spring passa automaticamente:
 
@@ -294,14 +296,17 @@ public ResponseEntity<UsuarioResponse> login(@RequestBody LoginRequest request,
         HttpServletRequest http, HttpServletResponse response) {
 ```
 
-**1. Validar a entrada.** Nome vazio é erro do cliente, então a resposta é 400:
+**1. Validar a entrada.** Nome ou senha vazios são erro do cliente, então a resposta é 400:
 
 ```java
     String nome = request.name() == null ? "" : request.name().trim();
-    if (nome.isEmpty()) {
+    String senha = request.password() == null ? "" : request.password();
+    if (nome.isEmpty() || senha.isEmpty()) {
         return ResponseEntity.badRequest().build();
     }
 ```
+
+O nome passa por `trim()`, mas a senha não: um espaço no começo ou no fim faz parte da senha.
 
 **2. Pedir ao Spring Security para autenticar.** O controller **não decide** quem entra. Ele monta uma *tentativa* (`unauthenticated`) e entrega ao `AuthenticationManager`. Se a tentativa for recusada, vem uma exceção, e a resposta é 401:
 
@@ -309,14 +314,14 @@ public ResponseEntity<UsuarioResponse> login(@RequestBody LoginRequest request,
     Authentication usuario;
     try {
         usuario = authenticationManager.authenticate(
-                UsernamePasswordAuthenticationToken.unauthenticated(nome, null));
+                UsernamePasswordAuthenticationToken.unauthenticated(nome, senha));
     }
     catch (AuthenticationException recusado) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
     }
 ```
 
-`UsernamePasswordAuthenticationToken` é a classe do Spring Security para "usuário + senha". Aqui a senha é `null`, porque não há senha.
+`UsernamePasswordAuthenticationToken` é a classe do Spring Security para "usuário + senha". Usuário inexistente e senha errada viram a **mesma** exceção (`BadCredentialsException`) e o mesmo 401. Se as respostas fossem diferentes, quem tenta adivinhar descobriria quais usuários existem.
 
 **3. Criar uma sessão nova.** Se já existia uma sessão, ela é descartada e outra é criada. Isso evita o ataque de *session fixation*, em que alguém faz a vítima usar um `JSESSIONID` que o atacante já conhece:
 
@@ -349,6 +354,8 @@ Quando a sessão é criada, o Tomcat devolve na resposta o cabeçalho `Set-Cooki
 ```java
     return ResponseEntity.ok(new UsuarioResponse(usuario.getName()));
 ```
+
+O nome devolvido é o **cadastrado** (`erick`), não o digitado: quem entrou como `Erick` recebe `erick`.
 
 **Quem está logado?**
 
@@ -483,46 +490,64 @@ Por economia, o Spring só grava o cookie `XSRF-TOKEN` quando alguém **lê** o 
 
 ```java
 @Bean
-AuthenticationManager authenticationManager(SomenteErickAuthenticationProvider provider) {
+AuthenticationManager authenticationManager(UserDetailsService usuarios, PasswordEncoder passwordEncoder) {
+    DaoAuthenticationProvider provider = new DaoAuthenticationProvider(usuarios);
+    provider.setPasswordEncoder(passwordEncoder);
     return new ProviderManager(provider);
 }
 ```
 
-É quem o `SessaoController` chama para autenticar. O `ProviderManager` é a implementação padrão: ele pergunta a cada `AuthenticationProvider` da lista se aceita a tentativa. Aqui a lista tem um só.
+São três peças, uma dentro da outra:
+
+- **`AuthenticationManager`**: quem o `SessaoController` chama para autenticar.
+- **`ProviderManager`**: a implementação padrão do `AuthenticationManager`. Ele pergunta a cada **`AuthenticationProvider`** da lista se aceita a tentativa. Aqui a lista tem um só.
+- **`DaoAuthenticationProvider`**: o provider padrão do Spring para usuário e senha. Ele faz duas coisas:
+  1. pede o usuário ao **`UserDetailsService`** (`loadUserByUsername("erick")`); se não existir, recusa;
+  2. pede ao **`PasswordEncoder`** para conferir a senha digitada com o hash guardado (`matches(digitada, hash)`); se não bater, recusa.
+
+  Nos dois casos a recusa é a mesma `BadCredentialsException`.
 
 Um efeito colateral: como existe um `AuthenticationManager` declarado, o Spring Boot **não** cria sozinho o usuário padrão `user` com senha aleatória, que ele cria quando o Spring Security está no classpath e ninguém configurou autenticação.
 
-### 2.9 `SomenteErickAuthenticationProvider`: quem pode entrar
+### 2.9 `UsuariosConfig`: quem pode entrar
 
 ```java
-@Component
-public class SomenteErickAuthenticationProvider implements AuthenticationProvider {
+@Configuration
+public class UsuariosConfig {
 
-    static final String USUARIO_PERMITIDO = "erick";
+    static final String HASH_SENHA_ERICK = "{bcrypt}$2a$10$bI6poxmO...";
 
-    @Override
-    public Authentication authenticate(Authentication tentativa) {
-        String nome = tentativa.getName().trim();
-        if (!nome.equalsIgnoreCase(USUARIO_PERMITIDO)) {
-            throw new BadCredentialsException("Usuário não autorizado");
-        }
-        return UsernamePasswordAuthenticationToken.authenticated(nome, null, List.of());
+    @Bean
+    UserDetailsService usuarios() {
+        UserDetails erick = User.withUsername("erick")
+            .password(HASH_SENHA_ERICK)
+            .build();
+        return new InMemoryUserDetailsManager(erick);
     }
 
-    @Override
-    public boolean supports(Class<?> tipo) {
-        return UsernamePasswordAuthenticationToken.class.isAssignableFrom(tipo);
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
     }
 }
 ```
 
-- **`@Component`**: "crie um bean desta classe". O `@ComponentScan` a encontra, e ela é injetada no método `authenticationManager` do `SecurityConfig`.
-- **`AuthenticationProvider`**: a interface do Spring Security para "conferir credenciais". Equivale a um `IdentityStore` do Jakarta Security ou a um *security realm* do Elytron no WildFly.
-- **`authenticate`**: recebe a tentativa. Se aceita, devolve um `Authentication` **autenticado**. Se recusa, lança uma `AuthenticationException` (aqui, a subclasse `BadCredentialsException`).
-- **`List.of()`**: a lista de *authorities* (perfis/roles) do usuário. Está vazia, porque não usamos perfis.
-- **`supports`**: diz quais tipos de tentativa este provider sabe tratar. O `ProviderManager` só chama `authenticate` se `supports` disser que sim.
+Juntas, as duas peças equivalem a um *security realm* do Elytron no WildFly, ou a um `IdentityStore` do Jakarta Security: "estes são os usuários, e assim se confere a senha".
 
-Por que separar a regra do controller? Porque, para **exigir senha**, bastaria trocar este provider pelo `DaoAuthenticationProvider` do Spring, com um `UserDetailsService` (que busca o usuário) e um `PasswordEncoder` (que confere a senha com hash), sem mexer no `SessaoController`.
+**`UserDetailsService`: de onde vêm os usuários.** É uma interface com um método só, `loadUserByUsername(nome)`, que devolve um **`UserDetails`**: nome, hash da senha, perfis, se a conta está bloqueada...
+
+- **`InMemoryUserDetailsManager`**: uma implementação que guarda os usuários numa lista **em memória**, fixa no código. Serve para estudo e testes. Ela não diferencia maiúsculas no nome do usuário: `Erick` e `ERICK` encontram `erick`.
+- **`User.withUsername(...)...build()`**: um *builder* para montar o `UserDetails`. Sem `.roles(...)` ou `.authorities(...)`, o usuário não tem nenhum perfil.
+- Num sistema real, você escreveria uma classe que implementa `UserDetailsService` e busca o usuário no banco de dados (ou usaria o `JdbcUserDetailsManager` do Spring). O resto do projeto não mudaria.
+
+**`PasswordEncoder`: como conferir a senha.** Senhas **nunca** se guardam em texto. Guarda-se um **hash**: o resultado de uma conta que só vai num sentido. Dá para conferir se uma senha digitada gera o mesmo hash, mas não dá para descobrir a senha a partir do hash.
+
+- **BCrypt** é o algoritmo usado. Ele é lento de propósito (o `$10$` no hash é o "custo"), para que testar milhões de senhas por força bruta seja caro. Também mistura um valor aleatório (*salt*) em cada hash: a mesma senha gera hashes diferentes a cada vez, e todos conferem.
+- **`createDelegatingPasswordEncoder()`** lê o prefixo entre chaves (`{bcrypt}`, `{argon2}`, `{pbkdf2}`...) para saber qual algoritmo usar ao conferir. Assim dá para trocar de algoritmo no futuro sem invalidar os hashes antigos. Para gerar hashes novos, ele usa BCrypt.
+
+A senha de estudo do `erick` está no [README](README.md). No código só existe o hash.
+
+Por que tudo isso fica fora do controller? Porque cada peça pode ser trocada sem mexer nas outras: usuários do banco no lugar da lista em memória, outro algoritmo de hash, ou outro provider (LDAP, por exemplo). O `SessaoController` só conhece o `AuthenticationManager`.
 
 ### 2.10 Testes
 
@@ -562,7 +587,7 @@ Lê-se como uma frase: "faça um POST em `/api/login`, com token CSRF válido, c
 | `.session(sessao)` | Usa uma `MockHttpSession`, uma sessão falsa que o teste controla |
 | `jsonPath("$.name")` | Lê um campo do JSON da resposta |
 
-Os testes cobrem os caminhos importantes: 401 sem login, 403 sem token CSRF, 400 com nome vazio, 401 com nome não permitido, e o logout invalidando a sessão.
+Os testes cobrem os caminhos importantes: 401 sem login, 403 sem token CSRF, 400 com nome ou senha vazios, 401 com senha errada ou usuário inexistente, e o logout invalidando a sessão. A senha de estudo aparece em texto só no teste, que precisa digitá-la como um usuário faria.
 
 **Quando o teste falha sem a correção.** Um teste só prova alguma coisa se ele **falhar** quando o problema existe. Ao corrigir a sessão criada sem login, o primeiro teste escrito, com `MockMvc`, falhava antes e **continuava falhando** depois da correção, porque o `MockMvc` mostrava uma sessão que o servidor real não criava. Daí veio o teste com servidor real, que falha sem a correção e passa com ela.
 
@@ -582,7 +607,7 @@ class SessaoAnonimaHttpTests {
 
 Por que não `MockMvc` aqui? Porque no `MockMvc` a requisição é simulada, e uma sessão aparece mesmo quando o servidor real não cria nenhuma. Para perguntas sobre o que realmente vai para o navegador (cookies, cabeçalhos), o teste com servidor real é o confiável. Ele é mais lento, então só vale a pena quando o `MockMvc` não responde à pergunta.
 
-**Teste de unidade** (`SomenteErickAuthenticationProviderTests`): o provider é uma classe Java comum, então o teste só faz `new SomenteErickAuthenticationProvider()` e chama o método, sem subir o Spring. É o tipo de teste mais rápido e simples.
+**E teste de unidade?** É o tipo mais rápido e simples: cria o objeto com `new` e chama o método, sem subir o Spring. Este projeto já teve um, quando a regra de login era uma classe própria (veja o commit *Troca o if do login por um AuthenticationProvider*). Hoje a regra é feita só com classes prontas do Spring, então não há código nosso para testar isoladamente: o que importa testar é se as peças foram ligadas certo, e isso os testes de integração fazem.
 
 ---
 
@@ -698,7 +723,7 @@ export class App implements OnInit {
 | Método | Quando roda | O que faz |
 |---|---|---|
 | `ngOnInit()` | Ao abrir a página (e após F5) | `GET /api/publico/mensagem` e `GET /api/me`. Se `/api/me` responder 200, chama `entrou(...)` |
-| `login()` | Ao enviar o formulário | Valida o nome, faz `POST /api/login`. Em 401, mostra "Usuário não autorizado." |
+| `login()` | Ao enviar o formulário | Exige nome e senha, faz `POST /api/login` e limpa a senha da tela. Em 401, mostra "Nome ou senha inválidos." |
 | `entrou(nome)` | Depois de um login ou de um `/api/me` com sucesso | Marca como logado e busca, nos endpoints protegidos, o nome em maiúsculas e a hora do login |
 | `logout()` | Ao clicar em **Sair** | `POST /api/logout` e limpa o estado da tela |
 
@@ -728,6 +753,22 @@ O campo de nome:
 - `(input)="..."`: a cada tecla, grava o texto digitado no signal. `$event` é o evento do navegador, e `$event.target` é o próprio `<input>`. `$any(...)` só diz ao TypeScript "confie em mim, isto tem `.value`".
 - Juntos, fazem o papel do `value="#{bean.nome}"` de um `h:inputText`, que no JSF é ligado nos dois sentidos de uma vez.
 
+O campo de senha é igual, com três diferenças:
+
+```html
+<input
+  id="senha"
+  type="password"
+  autocomplete="current-password"
+  [value]="senha()"
+  (input)="senha.set($any($event.target).value)"
+/>
+```
+
+- `type="password"` mostra bolinhas no lugar das letras (como `h:inputSecret`).
+- `autocomplete="current-password"` (e `autocomplete="username"` no campo de nome) avisa o navegador e os gerenciadores de senha de que este é um formulário de login, para eles oferecerem salvar e preencher a senha.
+- Depois de cada tentativa, `login()` faz `senha.set('')`: a senha não fica guardada na memória da tela à toa.
+
 O formulário:
 
 ```html
@@ -741,13 +782,13 @@ Por padrão, enviar um `<form>` faz o navegador **recarregar a página**, que é
 ### 3.5 Falando com o backend: `HttpClient`
 
 ```ts
-this.http.post<Usuario>('/api/login', { name }).subscribe({
+this.http.post<Usuario>('/api/login', { name, password }).subscribe({
   next: (u) => { ... },                      // deu certo (2xx), u é o JSON já convertido
   error: (erro: HttpErrorResponse) => { ... } // deu errado (4xx, 5xx ou rede)
 });
 ```
 
-- `post<Usuario>(url, corpo)`: o objeto `{ name }` (atalho para `{ name: name }`) vira JSON no corpo. `<Usuario>` diz o tipo esperado da resposta.
+- `post<Usuario>(url, corpo)`: o objeto `{ name, password }` (atalho para `{ name: name, password: password }`) vira JSON no corpo. `<Usuario>` diz o tipo esperado da resposta.
 - O `HttpClient` devolve um **Observable**, uma promessa de resultado futuro. **Nada é enviado até chamar `subscribe`.**
 - `subscribe({ next, error, complete })` registra o que fazer: `next` recebe a resposta, `error` recebe a falha, e `complete` roda quando termina com sucesso. No `logout()`, a resposta 204 não tem corpo, por isso se usa `complete`.
 - A chamada é **assíncrona**: o código continua enquanto a resposta não chega. Por isso as ações ficam dentro das funções passadas ao `subscribe`.
@@ -810,21 +851,24 @@ sequenceDiagram
     participant N as Navegador (Angular)
     participant F as Filtros do Spring Security
     participant C as SessaoController
-    participant M as AuthenticationManager
-    participant PR as SomenteErickAuthenticationProvider
-    N->>F: POST /api/login com nome erick e header X-XSRF-TOKEN
+    participant M as DaoAuthenticationProvider
+    participant U as UserDetailsService
+    participant E as PasswordEncoder
+    N->>F: POST /api/login com nome, senha e header X-XSRF-TOKEN
     Note over F: CsrfFilter confere o token<br/>AuthorizationFilter libera /api/login
     F->>C: login(...)
-    C->>M: authenticate(tentativa)
-    M->>PR: authenticate(tentativa)
-    PR-->>M: usuário autenticado
+    C->>M: authenticate(tentativa), via AuthenticationManager
+    M->>U: loadUserByUsername(erick)
+    U-->>M: usuário com o hash da senha
+    M->>E: matches(senha digitada, hash)
+    E-->>M: confere
     M-->>C: usuário autenticado
     Note over C: nova HttpSession + hora do login<br/>SecurityContext gravado na sessão
     C-->>N: 200 + nome + Set-Cookie JSESSIONID
     Note over N: entrou(nome) chama os endpoints protegidos
 ```
 
-Se o nome não for `erick`, o provider lança `BadCredentialsException`, o controller responde 401, **nenhuma sessão é criada**, e a tela mostra "Usuário não autorizado.".
+Se o usuário não existir ou a senha não conferir, o provider lança `BadCredentialsException`, o controller responde 401, **nenhuma sessão é criada**, e a tela mostra uma mensagem de erro.
 
 ### Chamada a um endpoint protegido
 
@@ -869,7 +913,7 @@ Sem o cookie (ou com a sessão expirada), o `AuthorizationFilter` recusa, o `Exc
 | 200 | OK | Sucesso, com JSON no corpo |
 | 204 | No Content | Logout feito (sucesso, sem corpo) |
 | 400 | Bad Request | Login com nome vazio |
-| 401 | Unauthorized | Sem login (ou sessão expirada), ou nome diferente de `erick` |
+| 401 | Unauthorized | Sem login (ou sessão expirada), ou usuário/senha errados |
 | 403 | Forbidden | POST sem o token CSRF (ou com token errado) |
 
 Apesar do nome, **401 significa "não autenticado"** (não sei quem você é), e **403 significa "proibido"** (sei, ou não importa, mas não pode).
@@ -880,13 +924,13 @@ Apesar do nome, **401 significa "não autenticado"** (não sei quem você é), e
 
 Em ordem de dificuldade. Cada um mexe numa parte diferente do projeto.
 
-1. **Mais um usuário permitido.** Faça `maria` também poder entrar. *Onde:* `SomenteErickAuthenticationProvider` (e o nome da classe deixa de fazer sentido...). Ajuste o teste de unidade.
+1. **Mais um usuário.** Faça `maria` também poder entrar, com uma senha própria. *Onde:* `UsuariosConfig`. Gere o hash como explica o README e acrescente um teste.
 2. **Um endpoint protegido novo.** Crie `GET /api/protegido/agora`, que devolve a hora atual do servidor, e mostre na tela. *Repare:* você não precisa mexer no `SecurityConfig`.
 3. **Um endpoint público novo.** Crie `GET /api/publico/versao` e mostre a versão do backend na tela. *Repare:* este precisa ser liberado no `SecurityConfig`, ou fica sob `/api/publico/**`?
 4. **Tempo de sessão.** Faça a sessão expirar em 1 minuto com `server.servlet.session.timeout=1m` em `application.properties`. Entre, espere e aperte F5. O que a tela mostra? (É o `session-timeout` do `web.xml`.)
 5. **Ver os cookies.** Abra as ferramentas do navegador (F12) → *Application* → *Cookies*. Observe o `JSESSIONID` (`HttpOnly`) e o `XSRF-TOKEN` (não `HttpOnly`), antes e depois do login e do logout.
 6. **Quebrar o CSRF de propósito.** No console do navegador (F12), rode `fetch('/api/logout', {method: 'POST'})` e veja o 403. Depois rode com o header certo, lendo o valor do cookie.
-7. **Senha de verdade.** Troque o provider por um `DaoAuthenticationProvider`, com um `InMemoryUserDetailsManager` (usuários em memória) e um `PasswordEncoder`. Acrescente um campo de senha na tela. *Repare:* o `SessaoController` muda pouco.
+7. **Usuários no banco.** Troque o `InMemoryUserDetailsManager` por um `UserDetailsService` próprio que busca o usuário numa tabela (com Spring Data JPA, ou com o `JdbcUserDetailsManager` do Spring). *Repare:* nem o `SecurityConfig` nem o `SessaoController` precisam mudar.
 8. **Perfis (roles).** Dê ao `erick` a authority `ROLE_ADMIN` e crie `/api/admin/**`, acessível só com esse perfil, usando `.requestMatchers("/api/admin/**").hasRole("ADMIN")`. É o `<auth-constraint><role-name>` do `web.xml`.
 
 ---
@@ -905,7 +949,8 @@ Em ordem de dificuldade. Cada um mexe numa parte diferente do projeto.
 | `HttpSession`, `JSESSIONID` | **Iguais** |
 | `@SessionScoped` | Atributo na `HttpSession`, ou `SecurityContext` do Spring Security |
 | `<security-constraint>` | `authorizeHttpRequests(...)` no `SecurityConfig` |
-| Realm do Elytron / `IdentityStore` | `AuthenticationProvider` |
+| Realm do Elytron / `IdentityStore` | `UserDetailsService` + `PasswordEncoder` (usados pelo `DaoAuthenticationProvider`) |
+| Usuários e senhas do realm (`application-users.properties`, banco) | `InMemoryUserDetailsManager` (aqui), ou um `UserDetailsService` que lê o banco |
 | `request.getUserPrincipal()` | Parâmetro `Authentication` no controller |
 | `<form-login-config>` (página de login) | Entry point que responde 401; a tela de login é do Angular |
 | `Filter` de servlet | `Filter` de servlet (iguais), e o Spring Security é uma cadeia deles |

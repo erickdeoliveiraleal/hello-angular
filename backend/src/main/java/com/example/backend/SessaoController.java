@@ -23,13 +23,12 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 
 /**
- * Login "de estudo" com a sessão HTTP do servidor (cookie JSESSIONID).
- * Não há senha.
+ * Login com usuário e senha, guardado na sessão HTTP do servidor (cookie JSESSIONID).
  *
  * O controller não decide quem entra: ele pede ao AuthenticationManager do Spring
- * Security, que consulta o {@link SomenteErickAuthenticationProvider}. O usuário
- * autenticado fica guardado na HttpSession. O logout é o do próprio Spring
- * (veja {@link SecurityConfig}).
+ * Security, que confere usuário e senha (veja {@link SecurityConfig} e
+ * {@link UsuariosConfig}). O usuário autenticado fica guardado na HttpSession. O logout
+ * é o do próprio Spring.
  */
 @RestController
 @RequestMapping("/api")
@@ -37,7 +36,7 @@ public class SessaoController {
 
 	static final String ATRIBUTO_HORA_LOGIN = "horaLogin";
 
-	public record LoginRequest(String name) {
+	public record LoginRequest(String name, String password) {
 	}
 
 	public record UsuarioResponse(String name) {
@@ -56,13 +55,17 @@ public class SessaoController {
 	public ResponseEntity<UsuarioResponse> login(@RequestBody LoginRequest request, HttpServletRequest http,
 			HttpServletResponse response) {
 		String nome = request.name() == null ? "" : request.name().trim();
-		if (nome.isEmpty()) {
+		// A senha não é "limpa": espaços fazem parte dela.
+		String senha = request.password() == null ? "" : request.password();
+		if (nome.isEmpty() || senha.isEmpty()) {
 			return ResponseEntity.badRequest().build();
 		}
-		// Quem decide é o Spring Security. Uma tentativa recusada vira exceção e 401.
+		// Quem decide é o Spring Security. Usuário inexistente e senha errada viram a
+		// mesma exceção (BadCredentialsException) e o mesmo 401: quem tenta adivinhar
+		// não descobre quais usuários existem.
 		Authentication usuario;
 		try {
-			usuario = authenticationManager.authenticate(UsernamePasswordAuthenticationToken.unauthenticated(nome, null));
+			usuario = authenticationManager.authenticate(UsernamePasswordAuthenticationToken.unauthenticated(nome, senha));
 		}
 		catch (AuthenticationException recusado) {
 			return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();

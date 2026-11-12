@@ -15,9 +15,18 @@
     <input
       id="name"
       type="text"
+      autocomplete="username"
       placeholder="Digite seu nome"
       [value]="name()"
       (input)="name.set($any($event.target).value)"
+    />
+    <label for="senha">Senha</label>
+    <input
+      id="senha"
+      type="password"
+      autocomplete="current-password"
+      [value]="senha()"
+      (input)="senha.set($any($event.target).value)"
     />
     <button type="submit">Entrar</button>
   </form>

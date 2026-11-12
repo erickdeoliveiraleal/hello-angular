@@ -62,32 +62,46 @@ O `ng serve` encaminha as chamadas a `/api` para `http://localhost:8080` via [`p
 
 ### Login por sessão (JSESSIONID)
 
-Só para estudo: **sem senha**, basta digitar um nome, mas **só o nome `erick` entra** (maiúsculas e minúsculas não importam). O servidor guarda o nome na sessão HTTP (`HttpSession`, a mesma API de servlet do WildFly) e o navegador fica com o cookie `JSESSIONID`, reenviado em toda chamada.
+O login pede **usuário e senha**. Há um único usuário, fixo no código, só para estudo:
 
-| Método | Caminho       | O que faz                                                                |
-| ------ | ------------- | ------------------------------------------------------------------------ |
-| POST   | `/api/login`  | `{ "name": "erick" }` cria a sessão; outro nome dá 401; nome vazio, 400   |
-| GET    | `/api/me`     | `{ "name": "erick" }` se houver sessão; senão 401                          |
-| POST   | `/api/logout` | invalida a sessão (204)                                                    |
+| Usuário | Senha de estudo |
+| ------- | --------------- |
+| `erick` | `estudo123`     |
 
-A regra fica em [`SomenteErickAuthenticationProvider`](backend/src/main/java/com/example/backend/SomenteErickAuthenticationProvider.java), com o nome fixo no código (`USUARIO_PERMITIDO`). O controller não decide nada: ele pede ao `AuthenticationManager` do Spring Security para autenticar, e o manager consulta o provider. Se o provider lança `BadCredentialsException`, o controller responde 401.
+O nome do usuário não diferencia maiúsculas; a senha, sim. O servidor guarda o usuário na sessão HTTP (`HttpSession`, a mesma API de servlet do WildFly) e o navegador fica com o cookie `JSESSIONID`, reenviado em toda chamada.
 
-> **Histórico:** antes, a regra era um `if` no próprio `SessaoController`. Compare os dois com `git show` no commit *Troca o if do login por um AuthenticationProvider*: o comportamento é o mesmo, mas agora quem entra é decidido num componente próprio. Para exigir senha, por exemplo, bastaria trocar o provider, sem mexer no controller.
+| Método | Caminho       | O que faz                                                                                  |
+| ------ | ------------- | ------------------------------------------------------------------------------------------ |
+| POST   | `/api/login`  | `{ "name": "erick", "password": "..." }` cria a sessão; usuário ou senha errados, 401; campo vazio, 400 |
+| GET    | `/api/me`     | `{ "name": "erick" }` se houver sessão; senão 401                                            |
+| POST   | `/api/logout` | invalida a sessão (204)                                                                      |
+
+Os usuários ficam em [`UsuariosConfig`](backend/src/main/java/com/example/backend/UsuariosConfig.java). O código guarda **só o hash BCrypt** da senha, nunca a senha em si. Quem confere é o `DaoAuthenticationProvider` do Spring Security, configurado em `SecurityConfig`. O controller não decide nada: ele pede ao `AuthenticationManager` para autenticar. Usuário inexistente e senha errada dão o mesmo 401, para quem tenta adivinhar não descobrir quais usuários existem.
+
+> **Histórico:** a regra de quem entra mudou três vezes. Primeiro um `if` no `SessaoController` (só o nome `erick`), depois um `AuthenticationProvider` próprio com a mesma regra, e por fim usuário e senha com os componentes padrão do Spring. Compare com `git show` nos commits *Só o nome erick pode entrar*, *Troca o if do login por um AuthenticationProvider* e *Login com usuário e senha*. O `SessaoController` quase não mudou nas duas últimas trocas.
+
+Para trocar a senha, gere o hash da nova senha com o mesmo encoder usado pelo backend, por exemplo num teste ou num `main` descartável:
+
+```java
+System.out.println(PasswordEncoderFactories.createDelegatingPasswordEncoder().encode("novaSenha"));
+```
+
+e cole o resultado (começa com `{bcrypt}`) em `HASH_SENHA_ERICK`. Cada execução gera um hash diferente para a mesma senha, porque o BCrypt mistura um valor aleatório (*salt*). Todos conferem.
 
 Dá para testar sem tela, com o `curl` guardando os cookies num arquivo (`-c` grava, `-b` envia). Todo POST precisa do token CSRF (veja [Proteção contra CSRF](#proteção-contra-csrf)): primeiro uma chamada qualquer para receber o cookie `XSRF-TOKEN`, depois o mesmo valor no header `X-XSRF-TOKEN`:
 
 ```bash
 curl -s -o /dev/null -c cookies.txt http://localhost:8080/api/publico/mensagem
 TOKEN=$(grep XSRF-TOKEN cookies.txt | cut -f7)
-curl -i -b cookies.txt -c cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -H "Content-Type: application/json" -d '{"name":"erick"}' http://localhost:8080/api/login
+curl -i -b cookies.txt -c cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -H "Content-Type: application/json" -d '{"name":"erick","password":"estudo123"}' http://localhost:8080/api/login
 curl -i -b cookies.txt http://localhost:8080/api/me
 curl -i -b cookies.txt -H "X-XSRF-TOKEN: $TOKEN" -X POST http://localhost:8080/api/logout
 curl -i -b cookies.txt http://localhost:8080/api/me
 ```
 
-A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 401 porque a sessão foi invalidada. Sem o header `X-XSRF-TOKEN`, o login dá 403. Com outro nome no lugar de `erick`, dá 401 e nenhuma sessão é criada.
+A resposta do login traz `Set-Cookie: JSESSIONID=...`; o último `/api/me` dá 401 porque a sessão foi invalidada. Sem o header `X-XSRF-TOKEN`, o login dá 403. Com outra senha ou outro usuário, dá 401 e nenhuma sessão é criada.
 
-Na tela, o formulário **Entrar** chama `/api/login` e, depois, a saudação usa `/api/protegido/uppercase` para mostrar o nome em maiúsculas. Como o `ng serve` faz proxy de `/api`, front e API ficam na mesma origem (`localhost:4200`) e o navegador envia o `JSESSIONID` sozinho, sem CORS. Um F5 mantém o login: a tela chama `/api/me` ao abrir.
+Na tela, o formulário **Entrar** (nome e senha) chama `/api/login` e, depois, a saudação usa `/api/protegido/uppercase` para mostrar o nome em maiúsculas. Como o `ng serve` faz proxy de `/api`, front e API ficam na mesma origem (`localhost:4200`) e o navegador envia o `JSESSIONID` sozinho, sem CORS. Um F5 mantém o login: a tela chama `/api/me` ao abrir.
 
 ### Endpoint público × endpoint protegido
 
@@ -134,7 +148,7 @@ No **Angular**, a tela inteira é um programa JavaScript que roda no navegador. 
 | `HttpServletRequest.getSession()`              | Igual; num managed bean, seria um `@SessionScoped`               |
 | `SecurityConfig` (Spring Security)             | `<security-constraint>` no `web.xml` / Jakarta Security          |
 | `.permitAll()` / `.authenticated()`            | URL fora / dentro de uma `<security-constraint>`                 |
-| `AuthenticationProvider` (quem pode entrar)    | `IdentityStore` do Jakarta Security / security realm do Elytron  |
+| `UserDetailsService` + `PasswordEncoder`       | `IdentityStore` do Jakarta Security / security realm do Elytron  |
 | `Authentication` recebido no controller        | `request.getUserPrincipal()` / `SecurityContext` do Jakarta      |
 | `./mvnw spring-boot:run` (servidor embutido)   | Gerar o `.war` e fazer deploy no WildFly                         |
 | `application.properties`                       | `standalone.xml` + `web.xml`                                     |
@@ -169,6 +183,7 @@ git show <hash>
 12. *Troca o if do login por um AuthenticationProvider*: a mesma regra no lugar que o Spring Security reserva para ela.
 13. *Adiciona CURSO.md*: o projeto inteiro explicado como um curso.
 14. *Não cria sessão para quem não está logado*: um ajuste de configuração e um teste contra o servidor real.
+15. *Login com usuário e senha*: senha com hash BCrypt, usando os componentes padrão do Spring Security, e o campo de senha na tela.
 
 ## Code scaffolding
 

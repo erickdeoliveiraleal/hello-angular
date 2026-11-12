@@ -29,6 +29,7 @@ export class App implements OnInit {
   protected readonly version = VERSION.full;
 
   protected readonly name = signal('');
+  protected readonly senha = signal('');
   protected readonly greeting = signal('Hello, World!');
   protected readonly error = signal('');
   /** Nome guardado na sessão do servidor (cookie JSESSIONID); null = não logado. */
@@ -53,11 +54,14 @@ export class App implements OnInit {
 
   protected login(): void {
     const name = this.name().trim();
-    if (!name) {
-      this.error.set('Digite um nome.');
+    const password = this.senha();
+    if (!name || !password) {
+      this.error.set('Digite o nome e a senha.');
       return;
     }
-    this.http.post<Usuario>('/api/login', { name }).subscribe({
+    // A senha não fica guardada na tela depois da tentativa, dando certo ou não.
+    this.senha.set('');
+    this.http.post<Usuario>('/api/login', { name, password }).subscribe({
       next: (u) => {
         this.error.set('');
         this.name.set('');
@@ -66,7 +70,7 @@ export class App implements OnInit {
       error: (erro: HttpErrorResponse) =>
         this.error.set(
           erro.status === 401
-            ? 'Usuário não autorizado.'
+            ? 'Nome ou senha inválidos.'
             : 'Não foi possível falar com o backend. Ele está rodando?',
         ),
     });

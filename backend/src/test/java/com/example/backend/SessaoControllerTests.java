@@ -14,10 +14,14 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 class SessaoControllerTests {
+
+	/** Senha de estudo do usuário erick (o código de produção só tem o hash). */
+	private static final String SENHA = "estudo123";
 
 	@Autowired
 	private MockMvc mockMvc;
@@ -29,26 +33,27 @@ class SessaoControllerTests {
 
 	@Test
 	void loginGuardaOUsuarioNaSessao() throws Exception {
-		MockHttpSession sessao = login(" Erick ");
+		MockHttpSession sessao = login(" Erick ", SENHA);
 
+		// O nome vem como foi cadastrado ("erick"), não como foi digitado.
 		mockMvc.perform(get("/api/me").session(sessao))
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.name").value("Erick"));
+			.andExpect(jsonPath("$.name").value("erick"));
 	}
 
 	@Test
 	void nomeVazioDevolve400() throws Exception {
-		mockMvc.perform(post("/api/login").with(csrf())
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"name\":\"  \"}"))
-			.andExpect(status().isBadRequest());
+		tentarLogin("  ", SENHA).andExpect(status().isBadRequest());
 	}
 
 	@Test
-	void nomeNaoAutorizadoDevolve401ESemSessao() throws Exception {
-		MockHttpSession sessao = (MockHttpSession) mockMvc.perform(post("/api/login").with(csrf())
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"name\":\"Ana\"}"))
+	void senhaVaziaDevolve400() throws Exception {
+		tentarLogin("erick", "").andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void senhaErradaDevolve401ESemSessao() throws Exception {
+		MockHttpSession sessao = (MockHttpSession) tentarLogin("erick", "errada")
 			.andExpect(status().isUnauthorized())
 			.andReturn().getRequest().getSession(false);
 
@@ -56,31 +61,44 @@ class SessaoControllerTests {
 	}
 
 	@Test
+	void usuarioInexistenteDevolveOMesmo401() throws Exception {
+		tentarLogin("ana", SENHA).andExpect(status().isUnauthorized());
+	}
+
+	@Test
 	void loginSemTokenCsrfDevolve403() throws Exception {
 		mockMvc.perform(post("/api/login")
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"name\":\"erick\"}"))
+				.content(corpo("erick", SENHA)))
 			.andExpect(status().isForbidden());
 	}
 
 	@Test
 	void logoutInvalidaASessao() throws Exception {
-		MockHttpSession sessao = login("erick");
+		MockHttpSession sessao = login("erick", SENHA);
 
 		mockMvc.perform(post("/api/logout").with(csrf()).session(sessao)).andExpect(status().isNoContent());
 
 		assertThat(sessao.isInvalid()).isTrue();
 	}
 
-	private MockHttpSession login(String nome) throws Exception {
-		MockHttpSession sessao = (MockHttpSession) mockMvc.perform(post("/api/login").with(csrf())
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"name\":\"" + nome + "\"}"))
+	private MockHttpSession login(String nome, String senha) throws Exception {
+		MockHttpSession sessao = (MockHttpSession) tentarLogin(nome, senha)
 			.andExpect(status().isOk())
-			.andExpect(jsonPath("$.name").value(nome.trim()))
+			.andExpect(jsonPath("$.name").value("erick"))
 			.andReturn().getRequest().getSession(false);
 		assertThat(sessao).isNotNull();
 		return sessao;
+	}
+
+	private ResultActions tentarLogin(String nome, String senha) throws Exception {
+		return mockMvc.perform(post("/api/login").with(csrf())
+			.contentType(MediaType.APPLICATION_JSON)
+			.content(corpo(nome, senha)));
+	}
+
+	private static String corpo(String nome, String senha) {
+		return "{\"name\":\"" + nome + "\",\"password\":\"" + senha + "\"}";
 	}
 
 }
