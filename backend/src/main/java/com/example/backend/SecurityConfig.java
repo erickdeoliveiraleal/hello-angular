@@ -13,6 +13,7 @@ import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.logout.HttpStatusReturningLogoutSuccessHandler;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.savedrequest.NullRequestCache;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import jakarta.servlet.FilterChain;
@@ -36,6 +37,10 @@ public class SecurityConfig {
 				.anyRequest().authenticated())
 			// Sem login: 401 (o padrão seria redirecionar para uma página de login, como no JSF).
 			.exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+			// Por padrão o Spring guarda na sessão a requisição recusada, para "voltar a ela"
+			// depois do login. Isso só serve para sites com redirecionamento; numa API, só
+			// criaria uma sessão à toa para cada visitante sem login.
+			.requestCache(cache -> cache.requestCache(new NullRequestCache()))
 			// O próprio Spring invalida a sessão e responde 204.
 			.logout(logout -> logout
 				.logoutUrl("/api/logout")

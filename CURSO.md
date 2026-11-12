@@ -424,6 +424,16 @@ public class SecurityConfig {
 
 O *entry point* é "o que fazer com quem precisa se autenticar". Num site tradicional, como no JSF, seria redirecionar para a página de login. Aqui é uma API JSON, então a resposta é só um 401, e quem decide mostrar o formulário é o Angular.
 
+**Não criar sessão para quem não está logado:**
+
+```java
+.requestCache(cache -> cache.requestCache(new NullRequestCache()))
+```
+
+Num site tradicional, quando alguém sem login tenta abrir `/pagina-x`, o Spring guarda essa requisição **na sessão**, redireciona para o login e, depois de entrar, leva a pessoa de volta a `/pagina-x`. É o *request cache*. Numa API isso não serve para nada, porque quem decide para onde ir é o Angular. E tem um efeito ruim: cada chamada recusada criava uma `HttpSession` (e um `JSESSIONID`) para um visitante anônimo, ocupando memória do servidor à toa. O `NullRequestCache` é um cache que não guarda nada.
+
+> Cuidado com a armadilha: `cache.disable()` parece fazer a mesma coisa, mas não faz. Ele só remove o configurador, e o tratamento de erro volta a usar o cache de sessão padrão. Foi preciso um teste contra o servidor real para perceber isso (veja [2.10](#210-testes)).
+
 **Logout:**
 
 ```java
@@ -553,6 +563,24 @@ Lê-se como uma frase: "faça um POST em `/api/login`, com token CSRF válido, c
 | `jsonPath("$.name")` | Lê um campo do JSON da resposta |
 
 Os testes cobrem os caminhos importantes: 401 sem login, 403 sem token CSRF, 400 com nome vazio, 401 com nome não permitido, e o logout invalidando a sessão.
+
+**Quando o teste falha sem a correção.** Um teste só prova alguma coisa se ele **falhar** quando o problema existe. Ao corrigir a sessão criada sem login, o primeiro teste escrito, com `MockMvc`, falhava antes e **continuava falhando** depois da correção, porque o `MockMvc` mostrava uma sessão que o servidor real não criava. Daí veio o teste com servidor real, que falha sem a correção e passa com ela.
+
+**Teste com servidor real** (`SessaoAnonimaHttpTests`):
+
+```java
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+class SessaoAnonimaHttpTests {
+
+    @LocalServerPort
+    private int porta;
+```
+
+- **`webEnvironment = RANDOM_PORT`**: desta vez o Tomcat sobe **de verdade**, numa porta livre qualquer, para os testes não brigarem com um backend que já esteja rodando na 8080.
+- **`@LocalServerPort`**: injeta o número da porta escolhida.
+- O teste usa o `java.net.http.HttpClient` do próprio Java para fazer um `GET /api/me` sem login e confere o cabeçalho `Set-Cookie`: deve vir o `XSRF-TOKEN`, mas **não** o `JSESSIONID`.
+
+Por que não `MockMvc` aqui? Porque no `MockMvc` a requisição é simulada, e uma sessão aparece mesmo quando o servidor real não cria nenhuma. Para perguntas sobre o que realmente vai para o navegador (cookies, cabeçalhos), o teste com servidor real é o confiável. Ele é mais lento, então só vale a pena quando o `MockMvc` não responde à pergunta.
 
 **Teste de unidade** (`SomenteErickAuthenticationProviderTests`): o provider é uma classe Java comum, então o teste só faz `new SomenteErickAuthenticationProvider()` e chama o método, sem subir o Spring. É o tipo de teste mais rápido e simples.
 
@@ -770,7 +798,7 @@ sequenceDiagram
     S-->>N: 200 + mensagem + Set-Cookie XSRF-TOKEN
     N->>P: GET /api/me
     P->>S: repassa
-    Note over S: AuthorizationFilter: ninguém logado
+    Note over S: AuthorizationFilter: ninguém logado<br/>nenhuma sessão é criada
     S-->>N: 401
     Note over N: usuario() continua null e o formulário aparece
 ```

@@ -167,6 +167,8 @@ git show <hash>
 10. *Troca o interceptor pelo Spring Security*: o mesmo comportamento feito pelo framework, mais a proteção contra CSRF.
 11. *Só o nome erick pode entrar (if no controller)*: um login que pode ser recusado.
 12. *Troca o if do login por um AuthenticationProvider*: a mesma regra no lugar que o Spring Security reserva para ela.
+13. *Adiciona CURSO.md*: o projeto inteiro explicado como um curso.
+14. *Não cria sessão para quem não está logado*: um ajuste de configuração e um teste contra o servidor real.
 
 ## Code scaffolding
 
