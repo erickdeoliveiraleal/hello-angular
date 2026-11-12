@@ -1,5 +1,6 @@
 package com.example.backend.auth;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -22,7 +23,8 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TokenService {
 
-	public record TokenResponse(String accessToken, String refreshToken, long expiresIn) {
+	/** Par de tokens emitido para um usuário. O refresh token vai em cookie, nunca no JSON. */
+	public record IssuedTokens(String user, String accessToken, String refreshToken, long expiresIn) {
 	}
 
 	private final JwtEncoder encoder;
@@ -30,10 +32,10 @@ public class TokenService {
 	private final JwtProperties properties;
 
 	/**
-	 * Refresh tokens já usados (jti -> expiração): cada refresh token vale uma vez só.
+	 * Refresh tokens já usados ou revogados no logout (jti -> expiração): cada refresh token vale uma vez só.
 	 * Fica em memória, então é zerado quando o backend reinicia.
 	 */
-	private final Map<String, Instant> usedRefreshTokens = new ConcurrentHashMap<>();
+	private final Map<String, Instant> revokedRefreshTokens = new ConcurrentHashMap<>();
 
 	public TokenService(JwtEncoder encoder, SecretKey jwtSecretKey, JwtProperties properties) {
 		this.encoder = encoder;
@@ -41,28 +43,50 @@ public class TokenService {
 		this.properties = properties;
 	}
 
-	public TokenResponse issue(String subject) {
+	public IssuedTokens issue(String subject) {
 		Instant now = Instant.now();
 		String accessToken = encode(subject, SecurityConfig.ACCESS, now, now.plus(properties.accessTokenTtl()));
 		String refreshToken = encode(subject, SecurityConfig.REFRESH, now, now.plus(properties.refreshTokenTtl()));
-		return new TokenResponse(accessToken, refreshToken, properties.accessTokenTtl().toSeconds());
+		return new IssuedTokens(subject, accessToken, refreshToken, properties.accessTokenTtl().toSeconds());
 	}
 
-	public TokenResponse refresh(String refreshToken) {
-		Jwt jwt;
-		try {
-			jwt = refreshDecoder.decode(refreshToken);
-		}
-		catch (JwtException ex) {
+	public IssuedTokens refresh(String refreshToken) {
+		Jwt jwt = decodeRefresh(refreshToken);
+		if (jwt == null) {
 			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token inválido ou expirado");
 		}
-
-		Instant now = Instant.now();
-		usedRefreshTokens.values().removeIf(expiresAt -> expiresAt.isBefore(now));
-		if (usedRefreshTokens.putIfAbsent(jwt.getId(), jwt.getExpiresAt()) != null) {
-			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token já utilizado");
+		if (!markRevoked(jwt)) {
+			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token já utilizado ou revogado");
 		}
 		return issue(jwt.getSubject());
+	}
+
+	/** Invalida o refresh token (logout ou troca de usuário). Token inválido é ignorado. */
+	public void revoke(String refreshToken) {
+		Jwt jwt = decodeRefresh(refreshToken);
+		if (jwt != null) {
+			markRevoked(jwt);
+		}
+	}
+
+	public Duration refreshTokenTtl() {
+		return properties.refreshTokenTtl();
+	}
+
+	private Jwt decodeRefresh(String refreshToken) {
+		try {
+			return refreshDecoder.decode(refreshToken);
+		}
+		catch (JwtException ex) {
+			return null;
+		}
+	}
+
+	/** @return {@code false} se o token já estava usado ou revogado. */
+	private boolean markRevoked(Jwt jwt) {
+		Instant now = Instant.now();
+		revokedRefreshTokens.values().removeIf(expiresAt -> expiresAt.isBefore(now));
+		return revokedRefreshTokens.putIfAbsent(jwt.getId(), jwt.getExpiresAt()) == null;
 	}
 
 	String encode(String subject, String tokenType, Instant issuedAt, Instant expiresAt) {
