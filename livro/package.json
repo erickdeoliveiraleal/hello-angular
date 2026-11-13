@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Ferramenta para gerar o EPUB do CURSO.md (desenha os diagramas Mermaid).",
+  "dependencies": {
+    "@mermaid-js/mermaid-cli": "11.4.2"
+  }
+}

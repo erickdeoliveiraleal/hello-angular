@@ -2,7 +2,7 @@
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.2.5.
 
-> 📘 **Novo em Angular e Spring Boot?** O [CURSO.md](CURSO.md) explica o projeto inteiro como um curso: arquitetura, cada classe, cada anotação e os fluxos de login passo a passo, comparando com JSF e WildFly.
+> 📘 **Novo em Angular e Spring Boot?** O [CURSO.md](CURSO.md) explica o projeto inteiro como um curso: arquitetura, cada classe, cada anotação e os fluxos de login passo a passo, comparando com JSF e WildFly. Para ler no Kindle, a pasta [`livro/`](livro/README.md) gera o curso em EPUB.
 
 ## Pré-requisitos
 
@@ -225,6 +225,7 @@ git show <hash>
 16. *Entrar de novo depois de sair, sem recarregar*: um bug de CSRF que os testes com `MockMvc` não pegavam.
 17. *Produção: um .jar só, com perfil prod*: o Maven compila o Angular para dentro do `.jar`, com cookies `Secure` atrás de um servidor web com HTTPS.
 18. *Posto de trabalho e permissões*: botões que aparecem conforme a permissão, e o backend recusando com 403 quem não a tem.
+19. *Gera o curso em EPUB*: o CURSO.md vira um livro para Kindle, com os diagramas em imagem.
 
 ## Code scaffolding
 
