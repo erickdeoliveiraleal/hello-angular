@@ -30,6 +30,24 @@ npm install
 >
 > No PowerShell, se `ng` der erro de política de execução de scripts, use `ng.cmd` ou `npx ng`.
 
+## Subir tudo com um comando
+
+Os scripts na raiz sobem o backend (porta 8080) e o frontend (porta 4200) de uma vez. Depois é só abrir `http://localhost:4200/`.
+
+No Windows, cada um abre na sua janela; para parar, feche as janelas:
+
+```bash
+iniciar.cmd
+```
+
+No Linux ou macOS, os dois rodam no mesmo terminal; `Ctrl+C` para os dois:
+
+```bash
+./iniciar.sh
+```
+
+Os dois precisam de `JAVA_HOME` apontando para um JDK 17 ou superior e rodam `npm install` se ainda não houver `node_modules`. As seções abaixo mostram como subir cada parte separadamente.
+
 ## Development server
 
 To start a local development server, run:
